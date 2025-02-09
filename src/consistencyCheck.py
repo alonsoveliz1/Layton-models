@@ -1,11 +1,11 @@
-from typing import List, Dict, Tuple, Set
 import os
+from typing import List, Dict, Tuple
+
 import pandas as pd
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', None)
 pd.set_option('display.max_colwidth', None)
-
 
 
 def find_csv_files(base_folder) -> List:
@@ -22,7 +22,6 @@ def find_csv_files(base_folder) -> List:
     return csv_files
 
 
-
 def get_file_info(csv_file: str) -> Dict:
     # Recoger informacion de los archivos csv para luego comprobar consistencia:
     # {nombre, numero de atributos, nombre de las columnas, diccionario con los tipos de cada atributo {attr:type}}
@@ -34,7 +33,6 @@ def get_file_info(csv_file: str) -> Dict:
         "column_names": list(df.columns),
         "dtypes": df.dtypes.to_dict(),
     }
-
 
 
 def analyze_column_consistency(csv_files, reference_csv):
@@ -64,16 +62,15 @@ def analyze_column_consistency(csv_files, reference_csv):
         print(f" {df_info["archivo"][df_info["num_columns"] != num_columns_reference]}\n")
 
 
-
-
-def check_file_consistency(csv_files, reference_csv) -> List[Tuple[str, str]]: # Devuelve una lista de tuplas {archivo no consistente, motivo}
+def check_file_consistency(csv_files, reference_csv) -> List[
+    Tuple[str, str]]:  # Devuelve una lista de tuplas {archivo no consistente, motivo}
     """Ahora que ya sabemos cuantos atributos tiene cada fichero csv, debemos garantizar que todos tengan los mismos atributos, en el mismo orden
        y con los mismos tipos. Para ello se elige un csv de referencia al igual que antes"""
 
     print(f"Usando el archivo de referencia ({reference_csv})")
 
     # Leemos 100 filas para inferir los tipos de los atributos
-    df_reference_header = pd.read_csv(reference_csv,nrows=100)
+    df_reference_header = pd.read_csv(reference_csv, nrows=100)
     reference_types = df_reference_header.dtypes.to_dict()  # Tipos del dataframe de referencia
 
     print(f"\nAtributos y tipos del csv de referencia {reference_csv}:")
@@ -93,7 +90,8 @@ def check_file_consistency(csv_files, reference_csv) -> List[Tuple[str, str]]: #
         tmp_columns = df_tmp_header.columns.tolist()
 
         if len(tmp_columns) != len(reference_columns):  # Si tienen mas o menos atributos
-            mismatched_files.append((csv_path,f"Tiene diferente numero de atributos ya que aparece un nuevo atributo {set(df_tmp_header.columns) - set(df_reference_header.columns)}"))
+            mismatched_files.append((csv_path,
+                                     f"Tiene diferente numero de atributos ya que aparece un nuevo atributo {set(df_tmp_header.columns) - set(df_reference_header.columns)}"))
             continue
 
         if tmp_columns != reference_columns:
@@ -104,11 +102,10 @@ def check_file_consistency(csv_files, reference_csv) -> List[Tuple[str, str]]: #
         for col in reference_columns:
             if reference_types[col] != tmp_dtypes[col]:
                 mismatched_files.append(
-                    (csv_path,f"Tipo diferente para el atributo '{col}' (Tipo de referencia: {reference_types[col]}, Tipo en el csv: {tmp_dtypes[col]})"))
-
+                    (csv_path,
+                     f"Tipo diferente para el atributo '{col}' (Tipo de referencia: {reference_types[col]}, Tipo en el csv: {tmp_dtypes[col]})"))
 
     return mismatched_files
-
 
 
 def run_consistency_check(base_folder: str, reference_csv: str):
@@ -127,18 +124,17 @@ def run_consistency_check(base_folder: str, reference_csv: str):
             print(f"- {file_path}: {reason}")
 
 
-
 def main():
-
     # DESCOMENTAR SI QUIERO ANALIZAR EL DATASET ORIGINAL
-    base_folder = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\raw\\CIC-BCCC-NRC-TabularIoT-2024"
-    reference_csv = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\raw\\CIC-BCCC-NRC-TabularIoT-2024\\CIC-BCCC-ACI-IOT-2023\\Benign Traffic.csv"
+    #base_folder = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\raw\\CIC-BCCC-NRC-TabularIoT-2024"
+    #reference_csv = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\raw\\CIC-BCCC-NRC-TabularIoT-2024\\CIC-BCCC-ACI-IOT-2023\\Benign Traffic.csv"
 
     # DESCOMENTAR SI QUIERO ANALIZAR EL DATASET PROCESADO (comprobacion de que este correcto)
-    #base_folder= "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\processed\\CIC-BCCC-NRC-TabularIoT-2024-MOD"
-    #reference_csv = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\processed\\CIC-BCCC-NRC-TabularIoT-2024-MOD\\CIC-BCCC-ACI-IOT-2023\\Benign Traffic.csv"
+    base_folder= "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\processed\\CIC-BCCC-NRC-TabularIoT-2024-MOD"
+    reference_csv = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\processed\\CIC-BCCC-NRC-TabularIoT-2024-MOD\\CIC-BCCC-ACI-IOT-2023\\Benign Traffic.csv"
 
-    run_consistency_check(base_folder,reference_csv)
+    run_consistency_check(base_folder, reference_csv)
+
 
 if __name__ == "__main__":
     main()
