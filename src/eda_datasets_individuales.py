@@ -8,23 +8,23 @@ import seaborn as sns
 
 
 def process_all_datasets(base_folder: str) -> None:
-    """Metodo lanzadera para procesar cada uno de los datasets a nivel individual."""
-
-    """Queremos generar graficos con un color diferente para cada tipo de ataque, y que en caso de que ese tipo de ataque se repita
+    """Metodo lanzadera para procesar cada uno de los datasets a nivel individual.
+        Queremos generar graficos con un color diferente para cada tipo de ataque, y que en caso de que ese tipo de ataque se repita
         entre csvs, que el color sea el mismo por lo que utilizaremos un diccionario"""
 
-    print("Getting all attack types in the CIC-BCCC-NRC-TabularIoT-2024")
-    all_attacks = get_all_attack_types(base_folder)
-    colors = generate_extended_colors(len(all_attacks))
 
-    attack_colors = dict(zip(all_attacks, colors))
+    print("Getting all attack types in the CIC-BCCC-NRC-TabularIoT-2024\n")
+    all_attacks = get_all_attack_types(base_folder) # Lista con todos los ataques del dataset
+    colors = generate_extended_colors(len(all_attacks)) # Genera ncolors para cada tipo de ataque
 
-    # Process each dataset
+    attack_colors = dict(zip(all_attacks, colors)) # {ataque:color}
+
+    # Procesar cada dataset
     for subfolder in sorted(os.listdir(base_folder)):
         process_single_dataset(base_folder, subfolder,attack_colors)
 
 
-def get_all_attack_types(base_folder: str):
+def get_all_attack_types(base_folder: str) -> set[str]:
     """Metodo para saber que tipos de ataque hay en cada dataset."""
     all_attacks = set()
     for subfolder in sorted(os.listdir(base_folder)):
@@ -32,17 +32,18 @@ def get_all_attack_types(base_folder: str):
         csv_files = glob.glob(os.path.join(dataset_path, "*.csv"))
 
         for csv_file in csv_files:
-            df_temp = pd.read_csv(csv_file, low_memory=False)
-            all_attacks.update(df_temp[df_temp['Label'] != 0]['Attack Name'].unique())
+            df_temp = pd.read_csv(csv_file, nrows= 1)
+            all_attacks.update(df_temp[df_temp['Label'] != 0]['Attack Name'].astype(str).unique())
             del df_temp
 
-    print(f"\nEn el dataset se presentan los siguientes tipos de ataque: {all_attacks}")
+    print(f"En el dataset se presentan n: {len(all_attacks)} ataques diferentes\n")
+    print(f"En el dataset se presentan los siguientes tipos de ataque: {all_attacks}\n")
     return all_attacks
 
 
 
 def generate_extended_colors(n_attacks: int) -> np.ndarray:
-    """Metodo para generar un conjunto de colores mas amplio, ya que disponemos de 48 tipos de ataque no nos sirve con una unica paleta."""
+    """Metodo para generar un conjunto de colores mas amplio, ya que disponemos de 41* (tras eliminar los que no son TCP) tipos de ataque no nos sirve con una unica paleta."""
     colormaps = [
         plt.colormaps['tab20'](np.linspace(0, 1, 20)),
         plt.colormaps['Set3'](np.linspace(0, 1, 12)),
@@ -58,8 +59,6 @@ def generate_extended_colors(n_attacks: int) -> np.ndarray:
 
     np.random.shuffle(all_colors)
     return all_colors
-
-
 
 def process_single_dataset(base_folder, subfolder: str, attack_colors) -> None:
     """El CIC-BCCC-ACI-IOT-2023, esta compuesto por 9 datasets, por lo que es interesante obtener informacion
@@ -79,20 +78,19 @@ def process_single_dataset(base_folder, subfolder: str, attack_colors) -> None:
     # Ejecucion de cada parte del analisis
     write_dataset_info(df_subfolder, subfolder) # Informacion general en formato txt
 
-    if 'Service' in df_subfolder.columns:
-        plot_service_attacked(df_subfolder, subfolder) # Distribucion de los servicios que reciben trafico
-
+    # Distribucion de atributos categoricos
     plot_label_distribution(df_subfolder, subfolder) # Distribucion del tipo de trafico de cada dataset (1 = malicioso 0 = benigno)
     plot_attack_distribution(df_subfolder, subfolder,attack_colors) # Distribucion del tipo de ataque dentro de cada dataset
-    boxplot_flow_duration(df_subfolder, subfolder) # Boxplot
-    plot_numerical_attributes_distribution(df_subfolder, subfolder)
+    plot_service_attacked(df_subfolder, subfolder) # Distribucion del tipo de servicio (puerto) accedido en cada dataset
+
+    plot_numerical_attributes_distribution(df_subfolder, subfolder) # Distribucion del resto de atributos numericos
 
 
 
 def write_dataset_info(df: pd.DataFrame, subfolder: str) -> None:
     """Vamos a guardar informacion individual de cada dataset en un txt, numero de filas, numero de filas duplicadas,
        distribucion de Label (tambien se hara mas adelante una grafica), valores nulos dentro del dataset y distribucion
-       de los tipos de ataque presentes en el dataset. Tambien vamos a analizar para cada variable numerica sus outliers"""
+       de los tipos de ataque presentes en el dataset. Tambien vamos a analizar para cada variable numerica sus outliers (POR IMPLEMENTAR)"""
 
     # Creamos un archivo txt con el nombre del dataset para escribir
     file_path = f'../analysis/text/{subfolder}_analysis.txt'
@@ -126,7 +124,7 @@ def write_dataset_info(df: pd.DataFrame, subfolder: str) -> None:
         sum_rows_with_negatives = df[numeric_cols].lt(0).any(axis=1).sum()
         write_to_file(f"Number of rows with negative values: {sum_rows_with_negatives}")
 
-        if(sum_rows_with_negatives > 0):
+        if sum_rows_with_negatives > 0:
             df_negative_mask = df[numeric_cols] < 0
             negative_columns = numeric_cols[df_negative_mask.any()]
             write_to_file(f"Attribues with negative values {list(negative_columns)}: \n")
@@ -140,8 +138,7 @@ def write_dataset_info(df: pd.DataFrame, subfolder: str) -> None:
         write_to_file(f"Date range: {df['Timestamp'].min()} to {df['Timestamp'].max()}")
 
         # Estadísticas de flujo
-        flow_cols = ['Flow Duration', 'Total Fwd Packet', 'Total Bwd packets',
-                     'Flow Bytes/s', 'Flow Packets/s']
+        flow_cols = ['Flow Duration', 'Total Fwd Packet', 'Total Bwd packets', 'Flow Bytes/s', 'Flow Packets/s']
         write_to_file("\nBASIC FLOW STATISTICS:")
         write_to_file("-" * 30)
         write_to_file(df[flow_cols].describe().to_string())
@@ -198,28 +195,35 @@ def write_dataset_info(df: pd.DataFrame, subfolder: str) -> None:
 
 
 
-"""POR IMPLEMENTAR: HACER QUE SE GUARDE EN SU RESPECTIVA CARPETA"""
 def plot_label_distribution(df: pd.DataFrame, subfolder: str) -> None:
     """Metodo para generar un grafico sobre la distribucion del atributo Label (tipo de conexión)."""
 
+    carpeta_proyecto = "C:\\Users\\avelg\\PycharmProjects\\NIDS"
+    target_path = os.path.join(carpeta_proyecto, "analysis", "diagrams", subfolder)
+
     plt.figure(figsize=(10, 6))
-    counts = df['Label'].value_counts()
+    counts = df['Label'].value_counts() # Numero de ocurrencias de trafico benigno y malicioso
     colors = ['red','green']
 
     ax = counts.plot(kind='bar', color=colors)
-    plt.title(f"Label Distribution in {subfolder}")
-    plt.xlabel("Connection Type (1 = malicious, 0 = benign)")
-    plt.ylabel("Frequency")
+    plt.title(f"Distribucion de la etiqueta de clase en {subfolder}")
+    plt.xlabel("Tipo de conexion (1 = malicioso, 0 = benigno)")
+    plt.ylabel("Frecuencia")
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
     plt.xticks(rotation=0)
     plt.tight_layout()
-    plt.show()
+
+    filename = "Tipo_de_trafico.png"
+    filepath = os.path.join(target_path, filename)
+    plt.savefig(filepath)
+    plt.close()
 
 
-
-"""POR IMPLEMENTAR: HACER QUE SE GUARDE EN SU RESPECTIVA CARPETA"""
 def plot_attack_distribution(df: pd.DataFrame, subfolder: str, attack_colors) -> None:
     """Metodo para generar un grafico sobre la distribucion del atributo "Tipo de Ataque"."""
+
+    carpeta_proyecto = "C:\\Users\\avelg\\PycharmProjects\\NIDS"
+    target_path = os.path.join(carpeta_proyecto, "analysis", "diagrams", subfolder)
 
     df_attacks = df[df['Label'] != 0]
     counts = df_attacks['Attack Name'].value_counts()
@@ -233,14 +237,20 @@ def plot_attack_distribution(df: pd.DataFrame, subfolder: str, attack_colors) ->
     plt.xticks(rotation=45, ha='right')
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
     plt.tight_layout()
-    plt.show()
+
+    filename = "Tipo_de_ataque.png"
+    filepath = os.path.join(target_path, filename)
+    plt.savefig(filepath)
     del df_attacks
+    plt.close()
 
 
-
-"""POR IMPLEMENTAR: HACER QUE SE GUARDE EN SU RESPECTIVA CARPETA"""
 def plot_service_attacked(df: pd.DataFrame, subfolder: str) -> None:
     """Metodo para generar un grafico sobre la distribucion del atributo "Tipo de Ataque"."""
+
+    carpeta_proyecto = "C:\\Users\\avelg\\PycharmProjects\\NIDS"
+    target_path = os.path.join(carpeta_proyecto, "analysis", "diagrams", subfolder)
+
     df_attacks = df[df['Label'] != 0]
     counts = df_attacks['Service'].value_counts()
 
@@ -252,32 +262,11 @@ def plot_service_attacked(df: pd.DataFrame, subfolder: str) -> None:
     plt.xticks(rotation=45, ha='right')
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
     plt.tight_layout()
-    plt.show()
 
-
-
-"""POR IMPLEMENTAR: HACER QUE SE GUARDE EN SU RESPECTIVA CARPETA"""
-def boxplot_flow_duration(df: pd.DataFrame, subfolder: str) -> None:
-    """Metodo para generar un boxplot para los valores de "Flow Duration" en cada dataset"""
-    df_seconds = df.copy()
-    df_seconds["Flow Duration"] = df_seconds["Flow Duration"] / 1000000
-    plt.figure(figsize=(10, 8))
-
-    ax = df_seconds.boxplot(column="Flow Duration", showmeans=True, vert=False,
-                    meanprops={"marker":"D", "markerfacecolor":"white", "markeredgecolor":"red", "markersize":10},
-                    flierprops={"marker":"o", "markerfacecolor":"gray", "markersize":4},
-                    medianprops={"color":"red"},
-                    boxprops={"color":"black"},
-                    whiskerprops={"color":"black"})
-
-    ax.set_xlabel("Duración (segundos)")
-    ax.set_ylabel("")
-
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
-    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f"{x:.2f}"))
-    plt.title(f"Duracion del flujo de comunicacion en {subfolder} ")
-    plt.show()
-
+    filename = "Tipo_de_servicio.png"
+    filepath = os.path.join(target_path, filename)
+    plt.savefig(filepath)
+    plt.close()
 
 
 def plot_numerical_attributes_distribution(df: pd.DataFrame, subfolder: str) -> None:
@@ -285,37 +274,38 @@ def plot_numerical_attributes_distribution(df: pd.DataFrame, subfolder: str) -> 
     target_path = os.path.join(carpeta_proyecto,"analysis","diagrams",subfolder)
 
     os.makedirs(target_path, exist_ok=True)
-    sample_df = df.sample(n = 10000, random_state = 42)
-    df_numeric = sample_df.select_dtypes(include=["float64", "int64"])
 
+    sample_size = min(1000000,len(df))
+    sample_df = df.sample(sample_size, random_state = 42)
+
+    df_numeric = sample_df.select_dtypes(include=["float64", "int64"])
     for col in df_numeric.columns:
         plt.figure(figsize=(15, 4))
+
+        # Elaboracion del histograma y configuracion de sus caracteristicas
         plt.subplot(1, 2, 1)
-        df_numeric[col].hist(grid=False)
+        df_numeric[col].hist(grid=False, color="royalblue", edgecolor="black")
+        plt.title(f"Histograma de {col}")
         plt.ylabel("Count")
+        plt.ticklabel_format(style='plain', axis='x') # Eliminar la notacion científica
+
         plt.subplot(1, 2, 2)
         sns.boxplot(x=df_numeric[col], width=0.5, showmeans=True,
-                    meanprops={"marker":"o",
-                          "markerfacecolor":"white",
-                          "markeredgecolor":"black",
-                          "markersize":"10"},
-                    flierprops={"marker":"D",
-                           "markerfacecolor":"red",
-                           "markeredgecolor":"black",
-                           "markersize":"5"},
-                    medianprops={"color": "red"},
-                    boxprops={"facecolor": "skyblue",
-                         "edgecolor": "black"},
-                    whiskerprops={"color": "black",
-                            "linestyle": "--"})
+                    meanprops={"marker":"o", "markerfacecolor":"white", "markeredgecolor":"royalblue", "markersize":"10"},
+                    flierprops={"marker":"D", "markerfacecolor":"royalblue", "markeredgecolor":"black", "markersize":"5"},
+                    medianprops={"color": "royalblue"},
+                    boxprops={"facecolor": "skyblue", "edgecolor": "black"},
+                    whiskerprops={"color": "black", "linestyle": "--"})
 
         plt.title(f"Distribucion de {col} en {subfolder}")
+        plt.ticklabel_format(style='plain', axis='x')
 
         valid_col_name = col.replace("/", "_").replace("\\", "_") # Para el atributo Flow Bytes/s por el tema de la barra en el path de windows
         filename = f"{valid_col_name}.png"
-        filepath = os.path.join(target_path, filename)
-        plt.savefig(filepath)
 
+        filepath = os.path.join(target_path, filename)
+
+        plt.savefig(filepath)
         plt.close()
 
     print(f"Saved the diagrams for {subfolder}")
