@@ -8,18 +8,19 @@ pd.set_option('display.max_rows', None)
 pd.set_option('display.max_colwidth', None)
 
 
-def find_csv_files(base_folder) -> List:
+def find_csv_files(base_folder) -> List[str]:
     # Metodo para ver cuantos archivos CSV componen el CIC-BCCC-NRC-TabularIoT-2024
     # Busco en el directorio base y subdirectorios (donde dentro estan los csv que componen cada dataset)
 
-    csv_files = []
+    csv_files: List[str] = []
     for subdir, _, files in os.walk(base_folder):
         for file in files:
-            if file.endswith(".csv"):
+            if isinstance(file, str) and file.endswith(".csv"):
                 csv_path = os.path.join(subdir, file)
                 csv_files.append(csv_path)
-    print(f"El dataset CIC-BCCC-NRC-TabularIoT-2024 se compone de {len(csv_files)} CSV files.\n")
+    print(f"El dataset CIC-BCCC-TabularIoT-2024-TCP se compone de {len(csv_files)} CSV files.\n")
     return csv_files
+
 
 
 def get_file_info(csv_file: str) -> Dict:
@@ -35,42 +36,15 @@ def get_file_info(csv_file: str) -> Dict:
     }
 
 
-def analyze_column_consistency(csv_files, reference_csv):
-    """Metodo para analizar cuantas columnas tiene cada fichero csv. Como ya sabemos que 85 son las esperadas, y que hay 2 archivos con 86
-       se incorpora funcionalidad para saber cual es exactamente los que difieren del resto, eligiendo un csv como referencia y comparando sobre el"""
 
-    info_csv_files = []
-    for csv_file in csv_files:
-        info_csv_files.append(get_file_info(csv_file))
-
-    # Convertimos en un df para poder representarlo
-    df_info = pd.DataFrame(info_csv_files)
-
-    print("\nDistribucion del numero de atributos en los diferentes archivos csv:")
-    print(df_info["num_columns"].value_counts())
-
-    # Si hay mas de una fila en el df (hay archivos con diferentes atributos)
-    if len(df_info["num_columns"].value_counts()) != 1:
-        # Leemos los atributos del csv que nombramos de "referencia"
-        df_reference_csv = pd.read_csv(reference_csv, nrows=0)
-
-        # Vemos cuantos tiene
-        num_columns_reference = len(df_reference_csv.columns)
-
-        # Mostramos cuales son los que tienen un numero diferente a el
-        print("\nLos ficheros que tienen un numero diferente de atributos son:")
-        print(f" {df_info["archivo"][df_info["num_columns"] != num_columns_reference]}\n")
-
-
-def check_file_consistency(csv_files, reference_csv) -> List[
-    Tuple[str, str]]:  # Devuelve una lista de tuplas {archivo no consistente, motivo}
+def check_file_consistency(csv_files, reference_csv) -> List[Tuple[str, str]]:  # Devuelve una lista de tuplas {archivo no consistente, motivo}
     """Ahora que ya sabemos cuantos atributos tiene cada fichero csv, debemos garantizar que todos tengan los mismos atributos, en el mismo orden
        y con los mismos tipos. Para ello se elige un csv de referencia al igual que antes"""
 
     print(f"Usando el archivo de referencia ({reference_csv})")
 
-    # Leemos 100 filas para inferir los tipos de los atributos
-    df_reference_header = pd.read_csv(reference_csv, nrows=100)
+    df_reference_header = pd.read_csv(reference_csv, nrows=100) # Leemos 100 filas para inferir los tipos de los atributos
+    reference_columns = df_reference_header.columns.tolist()  # Atributos del dataset que tomamos como referencia
     reference_types = df_reference_header.dtypes.to_dict()  # Tipos del dataframe de referencia
 
     print(f"\nAtributos y tipos del csv de referencia {reference_csv}:")
@@ -78,27 +52,25 @@ def check_file_consistency(csv_files, reference_csv) -> List[
         print(f" - {col}: {dt}")
     print("\n")
 
-    reference_columns = df_reference_header.columns.tolist()
-
     mismatched_files = []  # Array para almacenar cuales son los archivos que no cumplen consistencia
     for csv_path in csv_files:
-        if csv_path == reference_csv:
+        if csv_path == reference_csv: # Skippeamos el csv que hemos tomado como referencia
             continue
 
         # De la misma manera leemos atributos y tipos de cada uno de los csv (los referenciamos como tmp para iterarlos)
-        df_tmp_header = pd.read_csv(csv_path, nrows=10)
-        tmp_columns = df_tmp_header.columns.tolist()
+        curr_df_header = pd.read_csv(csv_path, nrows=100)
+        curr_columns = curr_df_header.columns.tolist()
 
-        if len(tmp_columns) != len(reference_columns):  # Si tienen mas o menos atributos
+        if len(curr_columns) != len(reference_columns):  # Si tienen mas o menos atributos
             mismatched_files.append((csv_path,
-                                     f"Tiene diferente numero de atributos ya que aparece un nuevo atributo {set(df_tmp_header.columns) - set(df_reference_header.columns)}"))
+                                     f"Tiene diferente numero de atributos ya que aparece un nuevo atributo {set(curr_df_header.columns) - set(df_reference_header.columns)}"))
             continue
 
-        if tmp_columns != reference_columns:
-            mismatched_files.append((csv_path, "Diferente orden en los atributos o diferente nombres"))
+        if curr_columns != reference_columns:
+            mismatched_files.append((csv_path, "Diferente orden en los atributos o diferentes nombres"))
             continue
 
-        tmp_dtypes = df_tmp_header.dtypes.to_dict()
+        tmp_dtypes = curr_df_header.dtypes.to_dict()
         for col in reference_columns:
             if reference_types[col] != tmp_dtypes[col]:
                 mismatched_files.append(
@@ -107,14 +79,28 @@ def check_file_consistency(csv_files, reference_csv) -> List[
 
     return mismatched_files
 
+def find_nulls(csv_files: list[str]) -> list[tuple[str, str, dict]]:
+    """Metodo para encontrar que csvs tienen valores nulos en alguno de sus atributos y devolverlos en la forma [archivo, total nulos, columnas_con_nulos: num_null_columna"""
+    csvs_with_nulls = []
+    for csv_file in csv_files:
+        df = pd.read_csv(csv_file)
+        null_counts = df.isna().sum()
+        total_nulls = null_counts.sum()
+
+        if total_nulls > 0:
+            null_columns = {col: count for col, count in null_counts.items() if count > 0}
+            csvs_with_nulls.append((csv_file, total_nulls, null_columns))
+            print(f"Found {total_nulls} nulls in {os.path.basename(csv_file)}")
+    return csvs_with_nulls
+
 
 def run_consistency_check(base_folder: str, reference_csv: str):
     """Metodo para invocar al proceso de verifcar la consistencia y mostrar su resultado. En caso de que no haya consistencia se muestra
        cual es el archivo que causa el problema, y el motivo."""
 
-    csv_files = find_csv_files(base_folder)
-    analyze_column_consistency(csv_files, reference_csv)
+    csv_files = find_csv_files(base_folder) # Array con los archivos csv
     mismatched_files = check_file_consistency(csv_files, reference_csv)
+    csvs_with_nulls = find_nulls(csv_files)
 
     if not mismatched_files:
         print("Todos los CSV son consistentes en número de columnas, orden, tipo y tipo de los atributos.")
@@ -122,19 +108,27 @@ def run_consistency_check(base_folder: str, reference_csv: str):
         print("Hay CSV que no son consistentes:")
         for file_path, reason in mismatched_files:
             print(f"- {file_path}: {reason}")
+    print("\n")
 
+    if csvs_with_nulls:
+        print("\nArchivos CSV con valores nulos:")
+        for file_path, total_nulls, null_columns in csvs_with_nulls:
+            print(f"- {file_path}: {total_nulls} valores nulos en total")
+            for col, count in null_columns.items():
+                print(f"  • {col}: {count} valores nulos")
+    else:
+        print("Ningún CSV tiene valores nulos en los atributos de sus filas.")
 
 def main():
     # DESCOMENTAR SI QUIERO ANALIZAR EL DATASET ORIGINAL
-    #base_folder = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\raw\\CIC-BCCC-NRC-TabularIoT-2024"
-    #reference_csv = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\raw\\CIC-BCCC-NRC-TabularIoT-2024\\CIC-BCCC-ACI-IOT-2023\\Benign Traffic.csv"
+    base_folder = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\raw\\CIC-BCCC-NRC-TabularIoT-2024"
+    reference_csv = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\raw\\CIC-BCCC-NRC-TabularIoT-2024\\CIC-BCCC-ACI-IOT-2023\\Benign Traffic.csv"
 
     # DESCOMENTAR SI QUIERO ANALIZAR EL DATASET PROCESADO (comprobacion de que este correcto)
-    base_folder= "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\processed\\CIC-BCCC-NRC-TabularIoT-2024-MOD"
-    reference_csv = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\processed\\CIC-BCCC-NRC-TabularIoT-2024-MOD\\CIC-BCCC-ACI-IOT-2023\\Benign Traffic.csv"
+    #base_folder= "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\processed\\CIC-BCCC-NRC-TabularIoT-2024-MOD"
+    #reference_csv = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\processed\\CIC-BCCC-NRC-TabularIoT-2024-MOD\\CIC-BCCC-ACI-IOT-2023\\Benign Traffic.csv"
 
     run_consistency_check(base_folder, reference_csv)
-
 
 if __name__ == "__main__":
     main()
