@@ -7,21 +7,21 @@ import pandas as pd
 import seaborn as sns
 
 
-def process_all_datasets(base_folder: str) -> None:
+def procesar_todos_datasets(base_folder: str) -> None:
     """Metodo lanzadera para procesar cada uno de los datasets a nivel individual.
         Queremos generar graficos con un color diferente para cada tipo de ataque, y que en caso de que ese tipo de ataque se repita
         entre csvs, que el color sea el mismo por lo que utilizaremos un diccionario"""
 
 
-    print("Getting all attack types in the CIC-BCCC-NRC-TabularIoT-2024\n")
+    print("Recopilando los ataques del CIC-BCCC-NRC-TabularIoT-2024\n")
     all_attacks = get_all_attack_types(base_folder) # Lista con todos los ataques del dataset
-    colors = generate_extended_colors(len(all_attacks)) # Genera ncolors para cada tipo de ataque
+    colors = generate_extended_colors(len(all_attacks)) # Genera ncolors, uno diferente para cada tipo de ataque
 
     attack_colors = dict(zip(all_attacks, colors)) # {ataque:color}
 
     # Procesar cada dataset
     for subfolder in sorted(os.listdir(base_folder)):
-        process_single_dataset(base_folder, subfolder,attack_colors)
+        process_single_dataset(base_folder, subfolder, attack_colors)
 
 
 def get_all_attack_types(base_folder: str) -> set[str]:
@@ -43,7 +43,7 @@ def get_all_attack_types(base_folder: str) -> set[str]:
 
 
 def generate_extended_colors(n_attacks: int) -> np.ndarray:
-    """Metodo para generar un conjunto de colores mas amplio, ya que disponemos de 41* (tras eliminar los que no son TCP) tipos de ataque no nos sirve con una unica paleta."""
+    """Metodo para generar un conjunto de colores mas amplio, ya que disponemos de 40* (tras eliminar los que no son TCP) tipos de ataque no nos sirve con una unica paleta."""
     colormaps = [
         plt.colormaps['tab20'](np.linspace(0, 1, 20)),
         plt.colormaps['Set3'](np.linspace(0, 1, 12)),
@@ -53,6 +53,7 @@ def generate_extended_colors(n_attacks: int) -> np.ndarray:
 
     all_colors = np.vstack(colormaps)
 
+    # En caso de que introdujesemos mas ataques al dataset o no fuesen suficientes
     if n_attacks > len(all_colors):
         additional_colors = plt.colormaps['hsv'](np.linspace(0, 1, n_attacks - len(all_colors)))
         all_colors = np.vstack([all_colors, additional_colors])
@@ -78,12 +79,13 @@ def process_single_dataset(base_folder, subfolder: str, attack_colors) -> None:
     # Ejecucion de cada parte del analisis
     write_dataset_info(df_subfolder, subfolder) # Informacion general en formato txt
 
-    # Distribucion de atributos categoricos
+    # Generamos graficas para determinar la distribucion de atributos categoricos
     plot_label_distribution(df_subfolder, subfolder) # Distribucion del tipo de trafico de cada dataset (1 = malicioso 0 = benigno)
     plot_attack_distribution(df_subfolder, subfolder,attack_colors) # Distribucion del tipo de ataque dentro de cada dataset
     plot_service_attacked(df_subfolder, subfolder) # Distribucion del tipo de servicio (puerto) accedido en cada dataset
 
-    plot_numerical_attributes_distribution(df_subfolder, subfolder) # Distribucion del resto de atributos numericos
+    # Distribucion del resto de atributos numericos
+    plot_numerical_attributes_distribution(df_subfolder, subfolder)
 
 
 
@@ -100,46 +102,46 @@ def write_dataset_info(df: pd.DataFrame, subfolder: str) -> None:
             f.write(str(text) + '\n')
 
         write_to_file("\n" + "#" * 50)
-        write_to_file(f"DATASET INFORMATION: {subfolder}")
+        write_to_file(f"INFORMACION DEL DATASET: {subfolder}")
         write_to_file(f"#" * 50)
 
         # Info del dataset
         df.info(buf=f)
 
         # Información básica
-        write_to_file(f"\nTotal rows: {df.shape[0]}")
-        write_to_file(f"Duplicate rows: {df.duplicated().sum()}")
+        write_to_file(f"\nNumero total de filas: {df.shape[0]}")
+        write_to_file(f"Numero de filas duplicadas: {df.duplicated().sum()}")
 
         # Análisis de valores nulos
         columns_with_nulls = df.columns[df.isnull().any()].tolist()
         if columns_with_nulls :
-            write_to_file(f"\nAttributes with missing values: {columns_with_nulls}")
+            write_to_file(f"\nAtributos con valores nulos: {columns_with_nulls}")
             rows_with_nulls = df.isnull().any(axis=1).sum()
-            write_to_file(f"\nRows with null values: {rows_with_nulls}")
+            write_to_file(f"\nFilas con valores nulos: {rows_with_nulls}")
         else:
-            write_to_file("There are no attributes with missing values\n")
+            write_to_file("No hay atributos con valores nulos\n")
 
         # Análisis de valores negativos
-        numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
+        numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns # Filtramos solo para columnas numericas
         sum_rows_with_negatives = df[numeric_cols].lt(0).any(axis=1).sum()
-        write_to_file(f"Number of rows with negative values: {sum_rows_with_negatives}")
+        write_to_file(f"Numero de filas con valores negativos: {sum_rows_with_negatives}")
 
         if sum_rows_with_negatives > 0:
             df_negative_mask = df[numeric_cols] < 0
             negative_columns = numeric_cols[df_negative_mask.any()]
-            write_to_file(f"Attribues with negative values {list(negative_columns)}: \n")
+            write_to_file(f"Los atributos que tienen valores negativos son {list(negative_columns)}: \n")
             del df_negative_mask
 
         # Análisis temporal
-        write_to_file("\nTIMESTAMP ANALYSIS:")
+        write_to_file("\nAnalisis temporal:")
         write_to_file("-" * 90)
         if df['Timestamp'].dtype == 'object':
             df['Timestamp'] = pd.to_datetime(df['Timestamp'], format='mixed')
-        write_to_file(f"Date range: {df['Timestamp'].min()} to {df['Timestamp'].max()}")
+        write_to_file(f"Rango de fechas: {df['Timestamp'].min()} hasta {df['Timestamp'].max()}")
 
         # Estadísticas de flujo
         flow_cols = ['Flow Duration', 'Total Fwd Packet', 'Total Bwd packets', 'Flow Bytes/s', 'Flow Packets/s']
-        write_to_file("\nBASIC FLOW STATISTICS:")
+        write_to_file("\nEstadisticas de los fluijos TCP:")
         write_to_file("-" * 30)
         write_to_file(df[flow_cols].describe().to_string())
 
@@ -147,7 +149,7 @@ def write_dataset_info(df: pd.DataFrame, subfolder: str) -> None:
         packet_cols = ['Total Length of Fwd Packet', 'Total Length of Bwd Packet',
                        'Packet Length Min', 'Packet Length Max', 'Packet Length Mean',
                        'Packet Length Std', 'Average Packet Size']
-        write_to_file("\nPACKET STATISTICS:")
+        write_to_file("\nEstadisticas de paquetes TCP:")
         write_to_file("-" * 30)
         write_to_file(df[packet_cols].describe().to_string())
 
@@ -155,43 +157,40 @@ def write_dataset_info(df: pd.DataFrame, subfolder: str) -> None:
         flag_cols = ['FIN Flag Count', 'SYN Flag Count', 'RST Flag Count',
                      'PSH Flag Count', 'ACK Flag Count', 'URG Flag Count',
                      'CWR Flag Count', 'ECE Flag Count']
-        write_to_file("\nFLAG COUNTS:")
+        write_to_file("\nEstadisticas de las flags de los paquetes:")
         write_to_file("-" * 30)
         write_to_file(df[flag_cols].agg(['sum', 'mean']).to_string())
 
         # IAT estadísticas
         iat_cols = ['Flow IAT Mean', 'Flow IAT Std', 'Flow IAT Max', 'Flow IAT Min',
                     'Fwd IAT Mean', 'Bwd IAT Mean']
-        write_to_file("\nINTER ARRIVAL TIME STATISTICS:")
+        write_to_file("\nEstadisticas de Inter Arrival Time:")
         write_to_file("-" * 30)
         write_to_file(df[iat_cols].describe().to_string())
 
         # Estadísticas de ventana
         window_cols = ['FWD Init Win Bytes', 'Bwd Init Win Bytes']
-        write_to_file("\nWINDOW SIZE STATISTICS:")
+        write_to_file("\nEstadisticas del tamaño de ventana:")
         write_to_file("-" * 30)
         write_to_file(df[window_cols].describe().to_string())
 
         # Estadísticas de actividad
         activity_cols = ['Active Mean', 'Active Std', 'Active Max', 'Active Min',
                          'Idle Mean', 'Idle Std', 'Idle Max', 'Idle Min']
-        write_to_file("\nACTIVITY STATISTICS:")
+        write_to_file("\nEstadisticas de actividad del flujo:")
         write_to_file("-" * 30)
         write_to_file(df[activity_cols].describe().to_string())
 
         # Distribución de etiquetas
-        write_to_file("\nLabel distribution:")
+        write_to_file("\nDistribucion del tipo de trafico en el dataset:")
         write_to_file(df["Label"].value_counts(dropna=False).to_string())
-        write_to_file("\nAttack Name distribution:")
+        write_to_file("\nDistribucion del tipo de ataque en el dataset:")
         write_to_file(df["Attack Name"].value_counts(dropna=False).to_string())
 
         write_to_file("\n" + "#" * 50 + "\n")
 
-        # Valores anomalos -- POR IMPLEMENTAR
-        df_numeric = df.select_dtypes(include=['int64', 'float64'])
-        info_valores_anomalos = []
 
-    print(f"Analysis saved to: analysis/{subfolder}_analysis.txt")
+    print(f"Analysis guardado en: analysis/{subfolder}_analysis.txt")
 
 
 
@@ -308,14 +307,14 @@ def plot_numerical_attributes_distribution(df: pd.DataFrame, subfolder: str) -> 
         plt.savefig(filepath)
         plt.close()
 
-    print(f"Saved the diagrams for {subfolder}")
+    print(f"Guardados los diagramas para {subfolder}")
 
 
 
 def main():
     base_folder= "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\processed\\CIC-BCCC-NRC-TabularIoT-2024-MOD"
     # Solo evaluar el dataset ya procesado, en caso contrario explota ya que hay csv que en el campo 'Date' tienen diferente formato
-    process_all_datasets(base_folder)
+    procesar_todos_datasets(base_folder)
 
 
 if __name__ == "__main__":
