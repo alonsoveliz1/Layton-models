@@ -1,1 +1,1 @@
-NIDS Project 
+KDD Process for creating a TCP network flow multilevel classification model NIDS Project based on the CIC-BCC-NRC-TabularioT-2024 dataset. So then it can be implemented in a flow sniffer to analyse and classify IoT network flows.
