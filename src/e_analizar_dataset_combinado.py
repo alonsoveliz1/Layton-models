@@ -33,6 +33,11 @@ def extraer_caracteristicas_txt(dataframe_final: pd.DataFrame) -> None:
         f.write(f"Filas benignas: {num_benign}\n")
         f.write(f"Filas maliciosas: {num_malicious}\n\n")
 
+        # Numero de filas benignas vs filas maliciosas
+        print("Extrayendo cantidad de clases en el dataset... \n")
+        for categoria in dataframe_final["Attack Category"].unique():
+            f.write(f"Filas de la categoria {categoria}: {len(dataframe_final[dataframe_final["Attack Category"] == categoria])}\n")
+
         # Ahora vamos a indagar sobre los tipos de ataques que hay en el dataset combinado
         # Creo un nuevo df con solo los ataques:
 
@@ -119,6 +124,26 @@ def procesar_dataset_graficos(dataframe_final: pd.DataFrame) -> None:
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
     plt.savefig("../analysis/diagrams/CIC-BCC-NRC-TabularIoT-2024/Attack Type.png")
+    plt.close()
+
+    # Segunda grafica: distribucion de los servicios de trafico benigno
+    df_benigno = dataframe_final[dataframe_final['Label'] == 0]
+    pd_series_servicio = df_benigno['Service'].value_counts()  # Como diccionario {ataque:conteo}
+    num_servicios = len(pd_series_servicio.index)
+
+    # Usamos la paleta turbo que tiene colores suficientes para los tipos de servicio
+    cmap = plt.get_cmap('turbo', num_categorias_ataque)
+    color_list = [cmap(i) for i in range(num_servicios)]
+
+    plt.figure(figsize=(10, 6))
+    ax = pd_series_servicio.plot(kind='bar', color=color_list)
+    plt.title("Distribución de 'Servicio' en conexiones benignas (Label=0)")
+    plt.xlabel("Tipo de Servicio")
+    plt.ylabel("Frecuencia")
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    plt.savefig("../analysis/diagrams/CIC-BCC-NRC-TabularIoT-2024/Service Type Benign.png")
     plt.close()
 
 
