@@ -132,54 +132,104 @@ def write_dataset_info(df: pd.DataFrame, subfolder: str) -> None:
             write_to_file(f"Los atributos que tienen valores negativos son {list(negative_columns)}: \n")
             del df_negative_mask
 
-        # Análisis temporal
+        ### ANALISIS DE LOS ATRIBUTOS DEL DATASET PARA VER QUE VALORES TIENEN
+
+        """ANALISIS TEMPORAL"""
         write_to_file("\nAnalisis temporal:")
         write_to_file("-" * 90)
         if df['Timestamp'].dtype == 'object':
             df['Timestamp'] = pd.to_datetime(df['Timestamp'], format='mixed')
         write_to_file(f"Rango de fechas: {df['Timestamp'].min()} hasta {df['Timestamp'].max()}")
 
-        # Estadísticas de flujo
+
+        """ESTADISTICAS DE LOS FLUJOS"""
         flow_cols = ['Flow Duration', 'Total Fwd Packet', 'Total Bwd packets', 'Flow Bytes/s', 'Flow Packets/s']
         write_to_file("\nEstadisticas de los fluijos TCP:")
         write_to_file("-" * 30)
         write_to_file(df[flow_cols].describe().to_string())
 
-        # Estadísticas de paquetes
-        packet_cols = ['Total Length of Fwd Packet', 'Total Length of Bwd Packet',
-                       'Packet Length Min', 'Packet Length Max', 'Packet Length Mean',
-                       'Packet Length Std', 'Average Packet Size']
+        """ESTADISTICAS DE LOS PAQUETES"""
+        packet_cols = ['Packet Length Min', 'Packet Length Max', 'Packet Length Mean', 'Packet Length Std', 'Packet Length Variance', 'Average Packet Size', 'Fwd Act Data Pkts']
+        packet_cols_f = ['Total Length of Fwd Packet', 'Fwd Packet Length Max', 'Fwd Packet Length Min', 'Fwd Packet Length Mean', 'Fwd Packet Length Std', 'Fwd Packets/s']
+        packet_cols_b = ['Total Length of Bwd Packet', 'Bwd Packet Length Max', 'Bwd Packet Length Min', 'Bwd Packet Length Mean', 'Bwd Packet Length Std','Bwd Packets/s']
+
         write_to_file("\nEstadisticas de paquetes TCP:")
-        write_to_file("-" * 30)
         write_to_file(df[packet_cols].describe().to_string())
+        write_to_file("\nEstadisticas de paquetes TCP (Forward):")
+        write_to_file(df[packet_cols_f].describe().to_string())
+        write_to_file("\n+ Estadisticas de paquetes TCP (Backward):")
+        write_to_file(df[packet_cols_b].describe().to_string())
+        write_to_file("-" * 30)
 
-        # Estadísticas de flags
-        flag_cols = ['FIN Flag Count', 'SYN Flag Count', 'RST Flag Count',
-                     'PSH Flag Count', 'ACK Flag Count', 'URG Flag Count',
+        """ESTADISTICAS DE LAS CABECERAS"""
+        header_cols = ['Fwd Header Length', 'Bwd Header Length']
+        write_to_file("\nEstadisticas de las cabeceras de los paquetes:")
+        write_to_file(df[header_cols].describe().to_string())
+
+        """ESTADISTICAS DE FLAGS"""
+        flag_cols = ['FIN Flag Count', 'SYN Flag Count', 'RST Flag Count', 'PSH Flag Count', 'ACK Flag Count', 'URG Flag Count',
                      'CWR Flag Count', 'ECE Flag Count']
+        flag_cols_f = ['Fwd PSH Flags', 'Fwd URG Flags']
+        flag_cols_b = ['Bwd PSH Flags', 'Bwd URG Flags']
+
         write_to_file("\nEstadisticas de las flags de los paquetes:")
+        write_to_file(df[flag_cols].describe().to_string())
+        write_to_file("\nEstadisticas de las flags de los paquetes (Forward):")
+        write_to_file(df[flag_cols_f].describe().to_string())
+        write_to_file("\nEstadisticas de las flags de los paquetes (Backward):")
+        write_to_file(df[flag_cols_b].describe().to_string())
         write_to_file("-" * 30)
-        write_to_file(df[flag_cols].agg(['sum', 'mean']).to_string())
 
-        # IAT estadísticas
-        iat_cols = ['Flow IAT Mean', 'Flow IAT Std', 'Flow IAT Max', 'Flow IAT Min',
-                    'Fwd IAT Mean', 'Bwd IAT Mean']
+        """ESTADISTICAS IAT (Inter Arrival Time)"""
+        iat_cols = ['Flow IAT Mean', 'Flow IAT Std', 'Flow IAT Max', 'Flow IAT Min', 'Fwd IAT Mean', 'Fwd IAT Std']
+        iat_cols2 = ['Bwd IAT Max', 'Bwd IAT Min', 'Bwd IAT Mean', 'Bwd IAT Std']
+
         write_to_file("\nEstadisticas de Inter Arrival Time:")
-        write_to_file("-" * 30)
         write_to_file(df[iat_cols].describe().to_string())
+        write_to_file("\nEstadisticas de Inter Arrival Time 2:")
+        write_to_file(df[iat_cols2].describe().to_string())
+        write_to_file("-" * 30)
 
-        # Estadísticas de ventana
+        """ESTADISTICAS DE LA VENTANA"""
+        # CANTIDAD DE DATOS QUE EL DESPOSITIVO DE DESTINO VA A PODER PROCESAR
         window_cols = ['FWD Init Win Bytes', 'Bwd Init Win Bytes']
         write_to_file("\nEstadisticas del tamaño de ventana:")
         write_to_file("-" * 30)
         write_to_file(df[window_cols].describe().to_string())
 
-        # Estadísticas de actividad
+        """ESTADISTICAS DE ACTIVIDAD"""
         activity_cols = ['Active Mean', 'Active Std', 'Active Max', 'Active Min',
-                         'Idle Mean', 'Idle Std', 'Idle Max', 'Idle Min']
+                         'Idle Mean', 'Idle Std', 'Idle Max', 'Idle Min','Down/Up Ratio']
         write_to_file("\nEstadisticas de actividad del flujo:")
         write_to_file("-" * 30)
         write_to_file(df[activity_cols].describe().to_string())
+
+        """ESTADISTICAS DE SEGMENTO"""
+        segment_cols = ['Fwd Segment Size Avg', 'Bwd Segment Size Avg', 'Fwd Seg Size Min']
+        write_to_file("\nEstadisticas de segmento:")
+        write_to_file("-" * 30)
+        write_to_file(df[segment_cols].describe().to_string())
+
+        """ESTADISTICAS DE TRANSMISION EN BLOQUES (RAFAGAS)"""
+        bulk_cols = ['Fwd Bytes/Bulk Avg', 'Fwd Packet/Bulk Avg', 'Fwd Bulk Rate Avg', 'Bwd Bytes/Bulk Avg', 'Bwd Packet/Bulk Avg', 'Bwd Bulk Rate Avg']
+        write_to_file("\nEstadisticas de rafagas de transmision:")
+        write_to_file("-" * 30)
+        write_to_file(df[bulk_cols].describe().to_string())
+
+        """ESTADISTICAS DE SUBFLOWS"""
+        subflow_cols = ['Subflow Fwd Packets', 'Subflow Bwd Packets', 'Subflow Fwd Bytes', 'Subflow Bwd Bytes']
+        write_to_file("\nEstadisticas de los sub-flujos:")
+        write_to_file("-" * 30)
+        write_to_file(df[subflow_cols].describe().to_string())
+
+        # Al analizar cuales eran las correlaciones entre atributos se ha visto que hay atributos que tienen 0 en todas sus  filas! En todos los datasets
+        # Por lo que parece que CICFlowMeter no recoge bien esta informacion
+        """ESTADISTICAS DE ATRIBUTOS CON VALORES EXTRAÑOS"""
+        atributos_extraños = ["Bwd PSH Flags", "Bwd URG Flags", "Fwd Bytes/Bulk Avg",
+                            "Fwd Packet/Bulk Avg", "Fwd Bulk Rate Avg"]
+        write_to_file("\nEstadisticas de los flujos anormales (Todos los valores son 0):")
+        write_to_file("-" * 30)
+        write_to_file(df[atributos_extraños].describe().to_string())
 
         # Distribución de etiquetas
         write_to_file("\nDistribucion del tipo de trafico en el dataset:")
@@ -188,7 +238,6 @@ def write_dataset_info(df: pd.DataFrame, subfolder: str) -> None:
         write_to_file(df["Attack Name"].value_counts(dropna=False).to_string())
 
         write_to_file("\n" + "#" * 50 + "\n")
-
 
     print(f"Analysis guardado en: analysis/{subfolder}_analysis.txt")
 
