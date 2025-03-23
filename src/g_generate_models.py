@@ -307,6 +307,11 @@ def main():
         import torch.optim as optim
         from torch.utils.data import DataLoader, TensorDataset
 
+        # CHECK IF CUDA IS BEING RECOGNISED
+        print(torch.version.cuda)
+        print(torch.backends.cudnn.version())
+
+
         print("\nTRAINING PYTORCH DNN\n")
 
         start_time = time.time()
