@@ -36,7 +36,7 @@ def extraer_caracteristicas_txt(dataframe_final: pd.DataFrame) -> None:
         # Numero de filas benignas vs filas maliciosas
         print("Extrayendo cantidad de clases en el dataset... \n")
         for categoria in dataframe_final["Attack Category"].unique():
-            f.write(f"Filas de la categoria {categoria}: {len(dataframe_final[dataframe_final["Attack Category"] == categoria])}\n")
+            f.write(f"Filas de la categoria {categoria}: {len(dataframe_final[dataframe_final['Attack Category'] == categoria])}\n")
 
         # Ahora vamos a indagar sobre los tipos de ataques que hay en el dataset combinado
         # Creo un nuevo df con solo los ataques:
@@ -49,7 +49,7 @@ def extraer_caracteristicas_txt(dataframe_final: pd.DataFrame) -> None:
         print("Contando cuantas instancias tiene cada tipo de ataque... \n")
         f.write("Distribucion los tipos de ataque en el dataset\n:")
         total_malicioso = df_malicioso["Attack Name"].value_counts()
-        f.write(f"{df_malicioso["Attack Name"].value_counts()}\n") # Cuenta los valores para cada ataque
+        f.write(f"{df_malicioso['Attack Name'].value_counts()}\n") # Cuenta los valores para cada ataque
 
         # Calculo del desequilibrio de clases
         print("Calculando ratios de desequilibrio de clases... \n")
