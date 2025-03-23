@@ -9,20 +9,28 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, accuracy_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder
-
+from sklearn.metrics import confusion_matrix
 
 def main():
     df = pd.read_csv("../data/processed/CIC-BCCC-NRC-TabularIoT-2024-MOD/combinado_balanceado.csv")
 
     # (1) Attributes that are not necessary for binary classifier
-    df = df.drop(columns=['Attack Name','Attack Category','Timestamp'])
+    df = df.drop(columns=['Attack Category','Timestamp'])
 
     # (2) Drop Label since it'll be our predicting value and timestamp
     X = df.drop(columns=['Label'])
     Y = df['Label']
 
-    X_train, X_temp, y_train, y_temp = train_test_split(X, Y, test_size = 0.3, random_state = 42, stratify = Y)
-    X_test, X_eval, y_test, y_eval = train_test_split(X_temp, y_temp, test_size = 1/3, random_state = 42, stratify = y_temp)
+    X_train, X_temp, y_train, y_temp = train_test_split(X, Y, test_size = 0.3, random_state = 42, stratify = df['Attack Name'])
+
+    df_temp = df.loc[X_temp.index].copy()
+    print(df_temp.shape)
+    print(df_temp.columns)
+    X_test, X_eval, y_test, y_eval = train_test_split(X_temp, y_temp, test_size = 1/3, random_state = 42, stratify = df_temp['Attack Name'])
+
+    X_train = X_train.drop(columns=['Attack Name'])
+    X_test = X_test.drop(columns=['Attack Name'])
+    X_eval = X_eval.drop(columns=['Attack Name'])
 
     print(f"Train set: {X_train.shape}, {y_train.shape}")
     print(f"Test set: {X_test.shape}, {y_test.shape}")
@@ -364,7 +372,7 @@ def main():
 
         # Define loss function and optimizer
         # Since dataset aint balanced I make it so errors of the malicious class are more penalized
-        weights = torch.tensor([1.0, 9.0], dtype=torch.float).to(device)
+        weights = torch.tensor([1.0, 3.0], dtype=torch.float).to(device)
 
         criterion = nn.CrossEntropyLoss(weight=weights)
         optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
@@ -438,6 +446,13 @@ def main():
         del model, X_train_tensor, y_train_tensor, X_test_tensor, y_test_tensor, X_eval_tensor, y_eval_tensor
         torch.cuda.empty_cache()
         gc.collect()
+
+        cm = confusion_matrix(y_eval, y_pred)
+        sns.heatmap(cm, annot=True, fmt='d')
+        plt.xlabel('Predicted')
+        plt.ylabel('Actual')
+        plt.title('Confusion Matrix')
+        plt.show()
 
     except Exception as e:
         print(f"Error with PyTorch: {e}")
