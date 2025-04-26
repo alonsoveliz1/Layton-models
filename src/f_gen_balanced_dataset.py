@@ -5,7 +5,7 @@ def generar_dataset_balanceado(df) -> None:
     df_malicious = df[df["Label"] == 1]
     df_benign = df[df["Label"] == 0]
 
-    n_instances = 100000
+    n_instances = 200000
     n_categories = df_malicious['Attack Category'].nunique()
 
     muestras_por_categoria = int(n_instances / n_categories)
@@ -41,9 +41,10 @@ def generar_dataset_balanceado(df) -> None:
     n_instances_benign = n_instances * n_categories
 
     for service_type, df_serv in df_benign.groupby('Service'):
+        replace_needed = (len(df_serv) < n_instances_benign)
         df_benign_bal = resample(
             df_serv,
-            replace = True,
+            replace = replace_needed,
             n_samples = int(n_instances_benign/n_services),
             random_state = 42
         )
@@ -55,6 +56,7 @@ def generar_dataset_balanceado(df) -> None:
     balanced_total.to_csv("C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\processed\\CIC-BCCC-NRC-TabularIoT-2024-MOD\\combinado_balanceado.csv", index = False)
 
     print(balanced_benign['Service'].value_counts())
+    print(balanced_total['Service'].value_counts())
 
 def main():
     df = pd.read_csv("../data/processed/CIC-BCCC-NRC-TabularIoT-2024-MOD/combinado.csv", low_memory=False)
