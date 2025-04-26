@@ -17,6 +17,9 @@ from sklearn.preprocessing import OneHotEncoder
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
 
 def main():
     pd.set_option('display.max_columns', None)
@@ -91,7 +94,7 @@ def main():
     }
 
     models = {
-        "LogReg": LogisticRegression(max_iter=1000, class_weight="balanced"),
+        "LogReg" : Pipeline([("scaler", StandardScaler()), ("clf", LogisticRegression(solver="lbfgs", max_iter=1000, class_weight="balanced"))]),
         "RF": RandomForestClassifier(n_estimators=200, class_weight="balanced", n_jobs=-1),
         "XGB": XGBClassifier(**base_params, n_jobs=-1)
     }
