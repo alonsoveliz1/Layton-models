@@ -1,110 +1,68 @@
-import gc
 import time
 
 import matplotlib.pyplot as plt
 import numpy as np
+import onnxmltools
+import optuna
 import pandas as pd
 import seaborn as sns
+import xgboost as xgb
+from onnxconverter_common.data_types import FloatTensorType
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, accuracy_score
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix, roc_curve, auc, f1_score, roc_auc_score
+from sklearn.metrics import precision_recall_curve, average_precision_score
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.preprocessing import OneHotEncoder
-from sklearn.metrics import confusion_matrix
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
 
 def main():
+    pd.set_option('display.max_columns', None)
     df = pd.read_csv("../data/processed/CIC-BCCC-NRC-TabularIoT-2024-MOD/combinado_balanceado.csv")
 
-    # (1) Attributes that are not necessary for binary classifier
-    df = df.drop(columns=['Attack Category','Timestamp'])
+    # TRAIN TEST EVAL SPLIT
+    X_train, X_test, X_eval, y_train, y_test, y_eval, eval_attack_names = train_test_eval_split(df)
 
-    # (2) Drop Label since it'll be our predicting value and timestamp
-    X = df.drop(columns=['Label'])
-    Y = df['Label']
+    # PREPROCESSING
+    X_train_final, X_test_final, X_eval_final = preprocess_df(X_train, X_test, X_eval)
 
-    X_train, X_temp, y_train, y_temp = train_test_split(X, Y, test_size = 0.3, random_state = 42, stratify = df['Attack Name'])
+    # FEATURE SELECTION - Extract correlation info
+    corr_threshold = 0.7
+    extract_correlation_info(X_train_final, corr_threshold) # Corr Matrix && List
 
-    df_temp = df.loc[X_temp.index].copy()
-    print(df_temp.shape)
-    print(df_temp.columns)
-    X_test, X_eval, y_test, y_eval = train_test_split(X_temp, y_temp, test_size = 1/3, random_state = 42, stratify = df_temp['Attack Name'])
-
-    X_train = X_train.drop(columns=['Attack Name'])
-    X_test = X_test.drop(columns=['Attack Name'])
-    X_eval = X_eval.drop(columns=['Attack Name'])
-
-    print(f"Train set: {X_train.shape}, {y_train.shape}")
-    print(f"Test set: {X_test.shape}, {y_test.shape}")
-    print(f"Eval set: {X_eval.shape}, {y_eval.shape}\n")
-
-    print("Train Label Distribution:\n", y_train.value_counts(normalize=True))
-    print("\nTest Label Distribution:\n", y_test.value_counts(normalize=True))
-    print("\nEval Label Distribution:\n", y_eval.value_counts(normalize=True))
-
-    numerical_features = X_train.select_dtypes(include=np.number).columns
-    categorical_features = X_train.select_dtypes(exclude=np.number).columns
-
-    # (3) One hot encoding of categorical attributes (Service)
-    ohe = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
-    ohe.fit(X_train[categorical_features])
-
-    X_train_ohe = ohe.transform(X_train[categorical_features])
-    X_test_ohe = ohe.transform(X_test[categorical_features])
-    X_eval_ohe = ohe.transform(X_eval[categorical_features])
-
-    ohe_cols = ohe.get_feature_names_out(categorical_features)
-    X_train_ohe = pd.DataFrame(X_train_ohe, columns=ohe_cols, index=X_train.index)
-    X_test_ohe = pd.DataFrame(X_test_ohe, columns=ohe_cols, index=X_test.index)
-    X_eval_ohe = pd.DataFrame(X_eval_ohe, columns=ohe_cols, index=X_eval.index)
-
-    # (4) Dropping Service from the train/test/eval
-    X_train_final = pd.concat([X_train.drop(columns=categorical_features), X_train_ohe], axis=1)
-    X_test_final = pd.concat([X_test.drop(columns=categorical_features), X_test_ohe], axis=1)
-    X_eval_final = pd.concat([X_eval.drop(columns=categorical_features), X_eval_ohe], axis=1)
-
-
-    """ CORRELATION BETWEEN ATTRIBUTES"""
-    # Plot full correlation matrix
-    corr_matrix = X_train_final.corr()
-    sns.clustermap(corr_matrix, cmap='coolwarm', linewidths =0.5,  figsize=(36, 36))
-    plt.show()
-
-    # Print pairs which are grather than > 0.7 THRESHOLD
-    threshold = 0.7
-    high_corr_pairs = np.where(np.abs(corr_matrix) > threshold)
-    high_corr_pairs = [(corr_matrix.index[x], corr_matrix.columns[y])
-                       for x, y in zip(*high_corr_pairs) if x != y and x < y]
-
-    print("Highly correlated pairs (>0.7 or < -0.7):")
-    for pair in high_corr_pairs:
-        print(pair, corr_matrix.loc[pair[0], pair[1]])
-
-    # Dimensionality Reduction (I only drop the attributes less related to the label
-    X_train_reduced, dropped_features = remove_correlated_features(X_train_final, y_train, threshold)
+    # DIMENSIONALITY REDUCTION (> Threshold but I only drop the attributes less related to the label)
+    X_train_reduced, dropped_features = remove_correlated_features(X_train_final, y_train, corr_threshold)
     X_test_reduced = X_test_final.drop(columns = dropped_features)
-    X_eval_reduced = X_eval_final.drop(columns=dropped_features)
+    X_eval_reduced = X_eval_final.drop(columns= dropped_features)
+
+    original_columns = X_train_reduced.columns.tolist()
+    feature_map_path = 'feature_map.txt'
+    with open(feature_map_path, 'w') as f:
+        for i, name in enumerate(original_columns):
+            f.write(f'{i} {name}\n')
+
 
     # Plot again the full correlated matrix with less attributes (41 less)
-    corr_matrix = X_train_reduced.corr()
-    sns.clustermap(corr_matrix, cmap='coolwarm', linewidths=0.5, figsize=(36, 36))
-    plt.show()
+    extract_correlation_info(X_train_reduced, corr_threshold)
 
-    """FEATURE IMPORTANCE"""
-    # We get again numerical & categorical features (since a lot of em have been dropped)
+    """
+    # FEATURE SCALING -> NO NEEDED SINCE USING A TREE BASED MODEL HAS IN THIS CASE A PERFORMANCE DROP (ONE HOT ENCODED ATTRS)
     numerical_features = X_train_reduced.select_dtypes(include=np.number).columns
-    categorical_features = X_train_reduced.select_dtypes(exclude=np.number).columns
+    scaler_stats = get_robust_scaler(X_train_reduced, numerical_features)
+    X_train_scaled = transform_robust_scaler_with_epsilon(X_train_reduced, scaler_stats)
+    X_test_scaled = transform_robust_scaler_with_epsilon(X_test_reduced, scaler_stats)
+    X_eval_scaled = transform_robust_scaler_with_epsilon(X_eval_reduced, scaler_stats)
+    """
 
-    X_train_scaled = robust_scaler_with_epsilon(X_train_reduced, numerical_features)
-
+    # Extract importances (RF)
     rf_model = RandomForestClassifier(random_state=42)
-    rf_model.fit(X_train_scaled, y_train)
-
-    # Extract importances
+    rf_model.fit(X_train_reduced, y_train)
     importances = rf_model.feature_importances_
-    features = X_train_scaled.columns
+    features = X_train_reduced.columns
 
-    # Sort them from highest to lowest
     sorted_idx = np.argsort(importances)[::-1]
-
     print("Feature Importances (highest to lowest):")
     for idx in sorted_idx:
         print(f"{features[idx]}: {importances[idx]}")
@@ -116,39 +74,70 @@ def main():
     plt.figure(figsize=(20, 12))
     plt.title("Feature Importances (RandomForest)")
     plt.bar([top_features[i] for i in range(len(top_features))], [top_importances[i] for i in range(len(top_importances))])
-    plt.xticks(rotation=90)
+    plt.xticks(rotation=45)
     plt.show()
 
-    """
-    # Set up PyCaret with optimized parameters
-    exp1 = setup(
-        df,
-        target='Label',
-        session_id=42,
-        normalize=True,
-        use_gpu=True,
-        verbose=True
-    )
-    
-    print("Starting compare models with pycaret\n")
-    # Specify LightGBM parameters when creating the model
-    best_model = compare_models()
 
-    # Tune the best model
-    tuned_model = tune_model(best_model)
+    # RENAMING ATTRIBUTES TO A F+{i} MAP SO THEN XGB MODEL CAN BE EXPORTED TO ONNX RUNTIME
+    X_train_reduced.columns = [f'f{i}' for i in range(X_train_reduced.shape[1])]
+    X_test_reduced.columns = [f'f{i}' for i in range(X_test_reduced.shape[1])]
+    X_eval_reduced.columns = [f'f{i}' for i in range(X_eval_reduced.shape[1])]
 
-    # Evaluate the model
-    evaluate_model(tuned_model)
+    # CROSS VALIDATION
+    base_params = {
+        'objective': 'binary:logistic',
+        'eval_metric': 'auc',
+        'device':'cuda'
+    }
 
-    # Optional: Save the model
-    save_model(tuned_model, 'FinalModel_22_03')
-    """
+    models = {
+        "LogReg": LogisticRegression(max_iter=1000, class_weight="balanced"),
+        "RF": RandomForestClassifier(n_estimators=200, class_weight="balanced", n_jobs=-1),
+        "XGB": XGBClassifier(**base_params, n_jobs=-1)
+    }
+
+    cv_folds = 5
+    skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    cv_results = {}
+
+    for name, model in models.items():
+        fold_metrics = []
+        for train_index, val_index in skf.split(X_train_reduced, y_train):
+            X_tr, X_val = X_train_reduced.iloc[train_index], X_train_reduced.iloc[val_index]
+            y_tr, y_val = y_train.iloc[train_index], y_train.iloc[val_index]
+
+            # train the correct model
+            model.fit(X_tr, y_tr)
+
+            # get probabilities (all three support predict_proba)
+            y_proba = model.predict_proba(X_val)[:, 1]
+            y_pred = (y_proba > 0.5).astype(int)
+
+            fold_metrics.append({
+                "accuracy": accuracy_score(y_val, y_pred),
+                "auc": roc_auc_score(y_val, y_proba),
+                "f1": f1_score(y_val, y_pred)
+            })
+        avg = pd.DataFrame(fold_metrics).mean().to_dict()
+        cv_results[name] = avg
+        del model, y_proba, y_pred
+
+    print(cv_results)
+
+    for name, res in cv_results.items():
+        print(
+            f"{name:6s} — "
+            f"Accuracy={res['accuracy']:.4f}, "
+            f"AUC={res['auc']:.4f}, "
+            f"F1={res['f1']:.4f}"
+        )
 
     results = {}
 
+
+
     # XGBoost model
     try:
-        import xgboost as xgb
         print("\nTRAINING XGBOOST\n")
 
         start_time = time.time()
@@ -158,49 +147,118 @@ def main():
         dtest = xgb.DMatrix(X_test_reduced, label=y_test)
         deval = xgb.DMatrix(X_eval_reduced, label=y_eval)
 
-        params = {
-            'objective': 'binary:logistic' if len(np.unique(y_train)) == 2 else 'multi:softmax',
-            'eval_metric': 'logloss' if len(np.unique(y_train)) == 2 else 'mlogloss', # Log regression binary clasification, softmax multiclass
-            'device': "cuda", # CUDA device selection
-            'max_depth': 12, # Max deph of tree
-            'eta': 0.05, # Learning rate
-            'min_child_weight': 1, # Minimum sum of instance weight needed in a child
-            'subsample': 0.9, # Ratio of training instances
-            'colsample_bytree': 0.9,
-            'max_bin': 256, # Bucket for continuous features
-            'grow_policy': 'lossguide', # Best loss reduction
-            'predictor': 'gpu_predictor', # Gpu prediction
-            'sampling_method': 'gradient_based' # Sample training instances
+        # Hyperparameter tuning with optuna API
+        def objective(trial):
+            params = {
+               'objective': 'binary:logistic',
+               'eval_metric': 'auc', # logloss
+               'device': 'cuda',
+               'max_depth': trial.suggest_int('max_depth', 3, 15),
+               'eta': trial.suggest_float('eta', 0.01, 0.3, log = True), # Learning rate
+               'min_child_weight': trial.suggest_float('min_child_weight', 1, 10),
+               'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+               'scale_pos_weight': trial.suggest_float('scale_pos_weight', 5, 15),
+               'gamma': trial.suggest_float('gamma', 0, 5),
+               'alpha': trial.suggest_float('alpha', 0, 5),
+               'lambda': trial.suggest_float('lambda', 0, 5)
+            }
+
+            prunning_callback = optuna.integration.XGBoostPruningCallback(trial, "validation-auc")
+            model = xgb.train(params, dtrain, num_boost_round=1000, evals = [(deval, 'validation')], callbacks=[prunning_callback], early_stopping_rounds=50, verbose_eval=False)
+            preds_proba = model.predict(deval)
+
+            # Best prediction threshold
+            precision, recall, thresholds = precision_recall_curve(y_eval, preds_proba)
+            avg_precision = average_precision_score(y_eval, preds_proba)
+
+            plt.figure(figsize=(8, 6))
+            plt.plot(recall, precision, label=f'PR curve (AP = {avg_precision:.2f})')
+            plt.xlabel('Recall')
+            plt.ylabel('Precision')
+            plt.title('Precision-Recall Curve')
+            plt.legend(loc='best')
+            plt.show()
+
+            best_score = float('-inf')
+            best_threshold = 0.5
+            best_fp_rate = 1.0
+            best_fn_rate = 1.0
+
+            for threshold in np.arange(0.3, 0.7, 0.01):
+                preds = (preds_proba > threshold).astype(int)
+                tn, fp, fn, tp = confusion_matrix(y_eval, preds).ravel()
+                fp_rate = fp / (fp + tn) if (fp + tn) > 0 else 0
+                fn_rate = fn / (fn + tp) if (fn + tp) > 0 else 0
+
+                precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+                recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+
+
+                # We want to attack the fp_rate but keeping a good recall
+
+                f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+                # score = recall - (0.5 * fp_rate)
+                score = f1_score
+
+                if score > best_score:
+                    best_score = score
+                    best_threshold = threshold
+                    best_fp_rate = fp_rate
+                    best_fn_rate = fn_rate
+
+            # Save best threshold and best fp_rate
+            trial.set_user_attr("best_threshold", best_threshold)
+            trial.set_user_attr("false_negative_rate", best_fn_rate)
+            trial.set_user_attr("false_positive_rate", best_fp_rate)
+            return best_score
+
+
+
+        # Create optuna study
+        study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler(seed=42))
+
+        # Optimize
+        study.optimize(objective, n_trials=50, timeout=3600)  # 50 intentos o 1 hora
+
+        # Get best params of the study
+        best_params = study.best_params
+        best_threshold = study.best_trial.user_attrs["best_threshold"]
+        best_fp_rate = study.best_trial.user_attrs["false_positive_rate"]
+
+        print("Mejores parámetros encontrados:")
+        print(best_params)
+        print(f"Mejor umbral: {best_threshold}")
+        print(f"Mejor tasa de falsos positivos: {best_fp_rate:.4f}")
+
+        # TRAIN MODEL WITH BEST PARAMS
+        final_params = {
+            'objective': 'binary:logistic',
+            'eval_metric': 'auc',
+            'device': 'cuda',
+            'tree_method': 'gpu_hist',
+            **best_params
         }
 
-        # Add num_class for multiclass
-        if len(np.unique(y_train)) > 2:
-            params['num_class'] = len(np.unique(y_train))
-
-        # Train with more boosting rounds
         model = xgb.train(
-            params,
+            final_params,
             dtrain,
-            num_boost_round=2000,
-            evals=[(dtrain, 'train'), (dtest, 'test'), (deval, 'eval')],
-            early_stopping_rounds=100,
-            verbose_eval=50
+            num_boost_round=1000,
+            evals=[(dtrain, 'train'), (deval, 'eval')],
+            early_stopping_rounds=50,
+            verbose_eval=100
         )
 
         # Make predictions
-        y_pred = model.predict(deval)
-        if len(np.unique(y_train)) > 2:
-            y_pred = np.argmax(y_pred, axis=1)
-        else:
-            y_pred = (y_pred > 0.5).astype(int)
+        y_pred_proba = model.predict(dtest) # The models give me the output (prediction)
+        y_pred = (y_pred_proba > best_threshold).astype(int) # If > 0,5 TRUE
 
         # Calculate metrics
-        acc = accuracy_score(y_eval, y_pred)
+        acc = accuracy_score(y_test, y_pred)
 
         print(f"XGBoost training completed in {time.time() - start_time:.2f} seconds")
         print(f"Accuracy: {acc:.4f}")
         print("\nClassification Report:")
-        print(classification_report(y_eval, y_pred))
+        print(classification_report(y_test, y_pred))
 
         results['xgboost'] = {
             'accuracy': acc,
@@ -216,261 +274,156 @@ def main():
             for feature, score in sorted_importance[:10]:
                 print(f"{feature}: {score}")
 
+        # Store predictions with the original data
+        evaluation_results = pd.DataFrame({
+            'true_label': y_test,
+            'predicted_label': y_pred,
+            'probability': y_pred_proba
+        })
+
+        # Check which are the attacks that are not classified properly
+        evaluation_results['attack_name'] = eval_attack_names
+
+        # Find all false negatives -> missed attacks
+        missed_attacks = evaluation_results[(evaluation_results['true_label'] == 1) &
+                                            (evaluation_results['predicted_label'] == 0)]
+
+        # Count missed attacks by type
+        missed_by_type = missed_attacks['attack_name'].value_counts()
+        total_by_type = evaluation_results[evaluation_results['true_label'] == 1]['attack_name'].value_counts()
+
+        all_attack_types = set(missed_by_type.index) | set(total_by_type.index)
+        miss_rates = {}
+
+        for attack in all_attack_types:
+            missed = missed_by_type.get(attack, 0)
+            total = total_by_type.get(attack, 0)
+
+            # Avoid division by zero
+            if total > 0:
+                miss_rates[attack] = (missed / total) * 100
+            else:
+                miss_rates[attack] = 0.0
+                print(f"Warning: No instances of {attack} in total_by_type")
+
+        # Convert to Series for sorting
+        miss_rate = pd.Series(miss_rates).sort_values(ascending=False)
+
+        print("Miss rate by attack type:")
+        for attack, rate in miss_rate.items():
+            if attack in total_by_type:
+                print(f"{attack}: {rate:.2f}% missed ({missed_by_type.get(attack, 0)} out of {total_by_type[attack]})")
+            else:
+                print(f"{attack}: No instances in evaluation set")
+
+
+        # ROC Curve from test
+        fpr, tpr, thresholds = roc_curve(y_test, y_pred_proba)
+        roc_auc = auc(fpr, tpr)
+
+        plt.figure(figsize=( 8 , 6 ))
+        plt.plot(fpr, tpr, label =f' ROC curve (AUC = {roc_auc:.2f})')
+        plt.plot([0, 1], [0, 1], 'k--', label='Random')
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Receiver operating characteristic (ROC) Curve')
+        plt.legend(loc='lower right')
+        plt.show()
+
+        # Confusion matrix
+        cm = confusion_matrix(y_test, y_pred)
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False)
+        plt.show()
+
+        try:
+            print(f"X_Train_reduced.shape {X_train_reduced.shape}")
+            num_features = X_train_reduced.shape[1]
+            feature_names = [f'f{i}' for i in range(num_features)] # Onnx wants a digit for each attr
+            feature_map_path = 'feature_map.txt'
+            with open(feature_map_path, 'w') as f:
+                for i,name in enumerate(X_train_reduced.columns):
+                    f.write(f'{i} {name} \n')
+            f.close()
+
+            onnx_path = "xgboost_flow_classifier_l1.onnx"
+            onnx_model = onnxmltools.convert_xgboost(model, initial_types=[('input', FloatTensorType([None, num_features]))])
+            with open("xgboost_model.onnx","wb") as f:
+                f.write(onnx_model.SerializeToString())
+
+            print(f"Model saved as {onnx_path}")
+        except Exception as e:
+            print(f"Error with ONNX Conversion: {e}")
+
         # Free memory
         del model, dtrain, dtest, deval
-        gc.collect()
 
     except Exception as e:
         print(f"Error with XGBoost: {e}")
 
-    # LightGBM Model
-    try:
-        import lightgbm as lgb
-        print("\nTRAINING LIGHTGM\n")
 
-        start_time = time.time()
+def train_test_eval_split(df):
 
-        # GPU parameters
-        params = {
-            'objective': 'binary' if len(np.unique(y_train)) == 2 else 'multiclass',
-            'metric': 'binary_logloss' if len(np.unique(y_train)) == 2 else 'multi_logloss',
-            'device': 'gpu',
-            'gpu_platform_id': 0,
-            'gpu_device_id': 0,
-            'max_depth': 15,
-            'num_leaves': 255,
-            'learning_rate': 0.05,
-            'verbose': 1,
-            'min_data_in_leaf': 1,
-            'min_data_in_bin': 1,
-            'bagging_fraction': 0.9,
-            'bagging_freq': 5,
-            'feature_fraction': 0.9,
-            'max_bin': 255,
-            'force_row_wise': True,
-            'histogram_pool_size': -1
-        }
+    print(f"Combined_balanced shape: {df.shape}") # Print the dataset rows && nª attrbs
+    print(f"Combined_balanced attributes: {df.columns}") # Print the dataset attributes
 
-        # Add num_class for multiclass
-        if len(np.unique(y_train)) > 2:
-            params['num_class'] = len(np.unique(y_train))
+    # (1) PREPARE DATA - Attributes that are not necessary for binary classifier (72 left)
+    df = df.drop(columns=["Attack Category","Timestamp"])
 
-        # Create dataset
-        train_data = lgb.Dataset(X_train_reduced, label=y_train)
-        test_data = lgb.Dataset(X_test_reduced, label=y_test, reference=train_data)
-        eval_data = lgb.Dataset(X_eval_reduced, label=y_eval, reference=train_data)
+    # (2) Drop Label since it'll be our predicting value
+    X = df.drop(columns=["Label"])
+    Y = df["Label"]
 
-        # Train with more rounds
-        model = lgb.train(
-            params,
-            train_data,
-            num_boost_round=2000,
-            valid_sets=[train_data, test_data, eval_data],
-            valid_names=['train', 'test', 'eval'],
-            callbacks=[lgb.early_stopping(100), lgb.log_evaluation(50)]
-        )
+    # (3) Train-test-eval (70-20-10)
+    X_train, X_temp, y_train, y_temp = train_test_split(X, Y, test_size = 0.3, random_state = 42, stratify = df["Attack Name"])
 
-        # Make predictions
-        y_pred = model.predict(X_eval_reduced)
-        if len(np.unique(y_train)) > 2:
-            y_pred = np.argmax(y_pred, axis=1)
-        else:
-            y_pred = (y_pred > 0.5).astype(int)
+    # (3.1) Auxiliary df to be able to do a second stratification by Attack Name
+    df_temp = df.loc[X_temp.index].copy()
+    # print(f"DF_temp shape: {df_temp.shape}")
+    # print(df_temp.columns)
 
-        # Calculate metrics
-        acc = accuracy_score(y_eval, y_pred)
+    X_test, X_eval, y_test, y_eval = train_test_split(X_temp, y_temp, test_size = 1/3, random_state = 42, stratify = df_temp['Attack Name'])
 
-        print(f"LightGBM training completed in {time.time() - start_time:.2f} seconds")
-        print(f"Accuracy: {acc:.4f}")
-        print("\nClassification Report:")
-        print(classification_report(y_eval, y_pred))
+    eval_attack_names = X_eval["Attack Name"].copy() # auxiliary for later
+    # print(eval_attack_names)
 
-        results['lightgbm'] = {
-            'accuracy': acc,
-            'model': model,
-            'training_time': time.time() - start_time
-        }
+    X_train = X_train.drop(columns=['Attack Name'])
+    X_test = X_test.drop(columns=['Attack Name'])
+    X_eval = X_eval.drop(columns=['Attack Name'])
 
-        # Get feature importance
-        if hasattr(model, 'feature_importance'):
-            importance = model.feature_importance(importance_type='gain')
-            feature_names = model.feature_name()
+    # print(f"Train set: {X_train.shape}, {y_train.shape}")
+    # print(f"Test set: {X_test.shape}, {y_test.shape}")
+    # print(f"Eval set: {X_eval.shape}, {y_eval.shape}\n")
 
-            print("\nTop 10 Feature Importance:")
-            sorted_idx = np.argsort(importance)[::-1]
-            for i in sorted_idx[:10]:
-                print(f"{feature_names[i]}: {importance[i]}")
+    # print("Train Label Distribution:\n", y_train.value_counts(normalize=True))
+    # print("\nTest Label Distribution:\n", y_test.value_counts(normalize=True))
+    # print("\nEval Label Distribution:\n", y_eval.value_counts(normalize=True))
+    # print("\n")
 
-        # Free memory
-        del model, train_data, test_data, eval_data
-        gc.collect()
+    return X_train, X_test ,X_eval , y_train, y_test, y_eval, eval_attack_names
 
-    except Exception as e:
-        print(f"Error with LightGBM: {e}")
+def preprocess_df(X_train, X_test, X_eval):
 
-        # PyTorch Deep Neural Network with GPU
-    try:
-        import torch
-        import torch.nn as nn
-        import torch.optim as optim
-        from torch.utils.data import DataLoader, TensorDataset
+    # PREPROCESSING - One hot encoding of categorical attributes (Service)
+    categorical_features = X_train.select_dtypes(exclude=np.number).columns
+    ohe = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+    ohe.fit(X_train[categorical_features])
 
-        # CHECK IF CUDA IS BEING RECOGNISED
-        print(torch.version.cuda)
-        print(torch.backends.cudnn.version())
+    X_train_ohe = ohe.transform(X_train[categorical_features])
+    X_test_ohe = ohe.transform(X_test[categorical_features])
+    X_eval_ohe = ohe.transform(X_eval[categorical_features])
 
+    ohe_cols = ohe.get_feature_names_out(categorical_features)
+    X_train_ohe = pd.DataFrame(X_train_ohe, columns=ohe_cols, index=X_train.index)
+    X_test_ohe = pd.DataFrame(X_test_ohe, columns=ohe_cols, index=X_test.index)
+    X_eval_ohe = pd.DataFrame(X_eval_ohe, columns=ohe_cols, index=X_eval.index)
 
-        print("\nTRAINING PYTORCH DNN\n")
+    # Dropping Service from the train/test/eval and concatenating with the OHE new features
+    X_train_final = pd.concat([X_train.drop(columns=categorical_features), X_train_ohe], axis=1)
+    X_test_final = pd.concat([X_test.drop(columns=categorical_features), X_test_ohe], axis=1)
+    X_eval_final = pd.concat([X_eval.drop(columns=categorical_features), X_eval_ohe], axis=1)
 
-        start_time = time.time()
-
-        # Check if GPU is available
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Using device: {device}")
-
-        # Convert data to PyTorch tensors
-        X_train_tensor = torch.FloatTensor(X_train_reduced.values if hasattr(X_train_reduced, 'values') else X_train_reduced).to(device)
-        y_train_tensor = torch.LongTensor(y_train.values if hasattr(y_train, 'values') else y_train).to(device)
-        X_test_tensor = torch.FloatTensor(X_test_reduced.values if hasattr(X_test_reduced, 'values') else X_test_reduced).to(device)
-        y_test_tensor = torch.LongTensor(y_test.values if hasattr(y_test, 'values') else y_test).to(device)
-        X_eval_tensor = torch.FloatTensor(X_eval_reduced.values if hasattr(X_eval, 'values') else X_eval_reduced).to(device)
-        y_eval_tensor = torch.LongTensor(y_eval.values if hasattr(y_eval, 'values') else y_eval).to(device)
-
-        # Create dataset and dataloader for batch processing
-        train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-        train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
-
-        # Define neural network architecture
-        input_size = X_train_reduced.shape[1]
-        hidden_sizes = [512, 256, 128, 64]
-        output_size = len(np.unique(y_train))
-
-        # All-in-one neural network definition
-        model = nn.Sequential(
-            nn.Linear(input_size, hidden_sizes[0]),
-            nn.ReLU(),
-            nn.BatchNorm1d(hidden_sizes[0]),
-            nn.Dropout(0.3),
-
-            nn.Linear(hidden_sizes[0], hidden_sizes[1]),
-            nn.ReLU(),
-            nn.BatchNorm1d(hidden_sizes[1]),
-            nn.Dropout(0.3),
-
-            nn.Linear(hidden_sizes[1], hidden_sizes[2]),
-            nn.ReLU(),
-            nn.BatchNorm1d(hidden_sizes[2]),
-            nn.Dropout(0.3),
-
-            nn.Linear(hidden_sizes[2], hidden_sizes[3]),
-            nn.ReLU(),
-            nn.BatchNorm1d(hidden_sizes[3]),
-            nn.Dropout(0.3),
-
-            nn.Linear(hidden_sizes[3], output_size)
-        ).to(device)
-
-        # Define loss function and optimizer
-        # Since dataset aint balanced I make it so errors of the malicious class are more penalized
-        weights = torch.tensor([1.0, 3.0], dtype=torch.float).to(device)
-
-        criterion = nn.CrossEntropyLoss(weight=weights)
-        optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.5)
-
-        # Training loop
-        epochs = 100
-        best_loss = float('inf')
-
-        print("Starting PyTorch training loop...")
-        for epoch in range(epochs):
-            model.train()
-            running_loss = 0.0
-
-            for inputs, labels in train_loader:
-                optimizer.zero_grad()
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-                loss.backward()
-                optimizer.step()
-
-                running_loss += loss.item()
-
-            # Validation
-            model.eval()
-            with torch.no_grad():
-                test_outputs = model(X_test_tensor)
-                test_loss = criterion(test_outputs, y_test_tensor)
-
-                _, predicted = torch.max(test_outputs, 1)
-                test_acc = (predicted == y_test_tensor).sum().item() / y_test_tensor.size(0)
-
-            # Learning rate scheduling
-            scheduler.step(test_loss)
-
-            # Print only every 10 epochs
-            if (epoch + 1) % 10 == 0:
-                print(
-                    f"Epoch {epoch + 1}/{epochs}, Loss: {running_loss / len(train_loader):.4f}, Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
-
-            # Save best model
-            if test_loss < best_loss:
-                best_loss = test_loss
-                torch.save(model.state_dict(), "best_dnn_model.pt")
-
-        # Load best model
-        model.load_state_dict(torch.load("best_dnn_model.pt"))
-
-        # Final evaluation
-        model.eval()
-        with torch.no_grad():
-            eval_outputs = model(X_eval_tensor)
-            _, y_pred = torch.max(eval_outputs, 1)
-            y_pred = y_pred.cpu().numpy()
-
-        # Calculate metrics
-        acc = accuracy_score(y_eval, y_pred)
-
-        print(f"PyTorch DNN training completed in {time.time() - start_time:.2f} seconds")
-        print(f"Accuracy: {acc:.4f}")
-        print("\nClassification Report:")
-        print(classification_report(y_eval, y_pred))
-
-        results['pytorch'] = {
-            'accuracy': acc,
-            'model': model,
-            'training_time': time.time() - start_time
-        }
-
-        # Free memory
-        del model, X_train_tensor, y_train_tensor, X_test_tensor, y_test_tensor, X_eval_tensor, y_eval_tensor
-        torch.cuda.empty_cache()
-        gc.collect()
-
-        cm = confusion_matrix(y_eval, y_pred)
-        sns.heatmap(cm, annot=True, fmt='d')
-        plt.xlabel('Predicted')
-        plt.ylabel('Actual')
-        plt.title('Confusion Matrix')
-        plt.show()
-
-    except Exception as e:
-        print(f"Error with PyTorch: {e}")
-
-        # Compare all model results
-    print("\n==== MODEL COMPARISON ====")
-    for model_name, model_results in results.items():
-        print(
-            f"{model_name.upper()}: Accuracy = {model_results['accuracy']:.4f}, Training Time = {model_results['training_time']:.2f} seconds")
-
-    # Return the best model based on accuracy
-    if results:
-        best_model_name = max(results.items(), key=lambda x: x[1]['accuracy'])[0]
-        print(f"\nBest model: {best_model_name.upper()} with accuracy {results[best_model_name]['accuracy']:.4f}")
-        return results[best_model_name]['model']
-    else:
-        print("No models were successfully trained.")
-        return None
+    return X_train_final, X_test_final, X_eval_final
 
 def robust_scaler_with_epsilon(df, columns):
     df_scaled = df.copy()
@@ -481,6 +434,25 @@ def robust_scaler_with_epsilon(df, columns):
         if iqr_val < 1e-8:
             iqr_val += 1e-8
         df_scaled[col] = (df[col] - median_val)/iqr_val
+    return df_scaled
+
+
+def get_robust_scaler(df, columns):
+    stats = {}
+    for col in columns:
+        median_val = df[col].median()
+        q1, q3 = np.percentile(df[col], [25, 75])
+        iqr_val = q3 -q1
+        if iqr_val < 1e-8:
+            iqr_val += 1e-8
+        stats[col] = {"median" : median_val, "iqr" : iqr_val}
+    return stats
+
+
+def transform_robust_scaler_with_epsilon(df, stats):
+    df_scaled = df.copy()
+    for col, vals in stats.items():
+        df_scaled[col] = (df[col] - vals["median"]) / vals["iqr"]
     return df_scaled
 
 def remove_correlated_features(X, y, threshold: float):
@@ -518,6 +490,22 @@ def remove_correlated_features(X, y, threshold: float):
     # Return the dataframe with reduced features
     return X.drop(columns=list(to_drop)), list(to_drop)
 
+def extract_correlation_info(df, threshold):
+    # Plot full correlation matrix
+    corr_matrix = df.corr()
+    sns.clustermap(corr_matrix, cmap='coolwarm', linewidths =0.5,  figsize=(36, 36))
+    plt.show()
+
+    # Print pairs which are grather than > 0.7 THRESHOLD
+    high_corr_pairs = np.where(np.abs(corr_matrix) > threshold)
+    high_corr_pairs = [(corr_matrix.index[x], corr_matrix.columns[y])
+                       for x, y in zip(*high_corr_pairs) if x != y and x < y]
+
+    print("Highly correlated pairs (>0.7 or < -0.7):")
+    for pair in high_corr_pairs:
+        print(pair, corr_matrix.loc[pair[0], pair[1]])
+
 
 
 main()
+
