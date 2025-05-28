@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from pathlib import Path
 
-
-def procesar_todos_datasets(base_folder: str) -> None:
+def process_dataset(base_folder: str, destination: str) -> None:
     """Metodo lanzadera para procesar cada uno de los datasets a nivel individual.
         Queremos generar graficos con un color diferente para cada tipo de ataque, y que en caso de que ese tipo de ataque se repita
         entre csvs, que el color sea el mismo por lo que utilizaremos un diccionario"""
@@ -21,7 +21,7 @@ def procesar_todos_datasets(base_folder: str) -> None:
 
     # Procesar cada dataset
     for subfolder in sorted(os.listdir(base_folder)):
-        process_single_dataset(base_folder, subfolder, attack_colors)
+        process_single_dataset(base_folder, subfolder, attack_colors, destination)
 
 
 def get_all_attack_types(base_folder: str) -> set[str]:
@@ -61,7 +61,7 @@ def generate_extended_colors(n_attacks: int) -> np.ndarray:
     np.random.shuffle(all_colors)
     return all_colors
 
-def process_single_dataset(base_folder, subfolder: str, attack_colors) -> None:
+def process_single_dataset(base_folder, subfolder: str, attack_colors, destination: str) -> None:
     """El CIC-BCCC-ACI-IOT-2023, esta compuesto por 9 datasets, por lo que es interesante obtener informacion
        a nivel individual de cada uno de ellos. Metodo lanzadera para cada dataset."""
 
@@ -77,25 +77,28 @@ def process_single_dataset(base_folder, subfolder: str, attack_colors) -> None:
     df_subfolder = pd.concat(dataframes)
 
     # Ejecucion de cada parte del analisis
-    write_dataset_info(df_subfolder, subfolder) # Informacion general en formato txt
+    write_dataset_info(df_subfolder, subfolder, destination) # Informacion general en formato txt
 
     # Generamos graficas para determinar la distribucion de atributos categoricos
-    plot_label_distribution(df_subfolder, subfolder) # Distribucion del tipo de trafico de cada dataset (1 = malicioso 0 = benigno)
-    plot_attack_distribution(df_subfolder, subfolder,attack_colors) # Distribucion del tipo de ataque dentro de cada dataset
-    plot_service_attacked(df_subfolder, subfolder) # Distribucion del tipo de servicio (puerto) accedido en cada dataset
+    plot_label_distribution(df_subfolder, subfolder, destination) # Distribucion del tipo de trafico de cada dataset (1 = malicioso 0 = benigno)
+    plot_attack_distribution(df_subfolder, subfolder,attack_colors, destination) # Distribucion del tipo de ataque dentro de cada dataset
+    if destination == "processed":
+            plot_service_attacked(df_subfolder, subfolder, destination) # Distribucion del tipo de servicio (puerto) accedido en cada dataset
 
     # Distribucion del resto de atributos numericos
-    plot_numerical_attributes_distribution(df_subfolder, subfolder)
+    plot_numerical_attributes_distribution(df_subfolder, subfolder, destination)
 
 
 
-def write_dataset_info(df: pd.DataFrame, subfolder: str) -> None:
+def write_dataset_info(df: pd.DataFrame, subfolder: str, destination) -> None:
     """Vamos a guardar informacion individual de cada dataset en un txt, numero de filas, numero de filas duplicadas,
        distribucion de Label (tambien se hara mas adelante una grafica), valores nulos dentro del dataset y distribucion
        de los tipos de ataque presentes en el dataset. Tambien vamos a analizar para cada variable numerica sus outliers (POR IMPLEMENTAR)"""
 
     # Creamos un archivo txt con el nombre del dataset para escribir
-    file_path = f'../analysis/text/{subfolder}_analysis.txt'
+    file_path = f'../analysis/text/{destination}/{subfolder}_analysis.txt'
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
     with open(file_path, 'w') as f:
         pd.options.display.min_rows = 100
         def write_to_file(text):
@@ -133,13 +136,6 @@ def write_dataset_info(df: pd.DataFrame, subfolder: str) -> None:
             del df_negative_mask
 
         ### ANALISIS DE LOS ATRIBUTOS DEL DATASET PARA VER QUE VALORES TIENEN
-
-        """ANALISIS TEMPORAL"""
-        write_to_file("\nAnalisis temporal:")
-        write_to_file("-" * 90)
-        if df['Timestamp'].dtype == 'object':
-            df['Timestamp'] = pd.to_datetime(df['Timestamp'], format='mixed')
-        write_to_file(f"Rango de fechas: {df['Timestamp'].min()} hasta {df['Timestamp'].max()}")
 
 
         """ESTADISTICAS DE LOS FLUJOS"""
@@ -237,17 +233,27 @@ def write_dataset_info(df: pd.DataFrame, subfolder: str) -> None:
         write_to_file("\nDistribucion del tipo de ataque en el dataset:")
         write_to_file(df["Attack Name"].value_counts(dropna=False).to_string())
 
-        write_to_file("\n" + "#" * 50 + "\n")
+        write_to_file("\nPuertos de destino más frecuentes:")
+        write_to_file("-" * 30)
+
+        if destination == "raw": # Column doesnt exist in the processed dataset
+            if 'Dst Port' in df.columns:
+                top_ports = df['Dst Port'].value_counts().head(20)  # Top 20 más comunes
+                write_to_file(top_ports.to_string())
+            else:
+                write_to_file("No se encontró la columna 'Dst Port'.")
+            write_to_file("\n" + "#" * 50 + "\n")
 
     print(f"Analysis guardado en: analysis/{subfolder}_analysis.txt")
 
 
 
-def plot_label_distribution(df: pd.DataFrame, subfolder: str) -> None:
+def plot_label_distribution(df: pd.DataFrame, subfolder: str, destination: str) -> None:
     """Metodo para generar un grafico sobre la distribucion del atributo Label (tipo de conexión)."""
 
-    carpeta_proyecto = "C:\\Users\\avelg\\PycharmProjects\\NIDS"
-    target_path = os.path.join(carpeta_proyecto, "analysis", "diagrams", subfolder)
+    carpeta_proyecto = Path(__file__).resolve().parent.parent
+    target_path = carpeta_proyecto / "analysis"/ "diagrams"/ destination / subfolder
+    os.makedirs(target_path, exist_ok=True)
 
     plt.figure(figsize=(10, 6))
     counts = df['Label'].value_counts() # Numero de ocurrencias de trafico benigno y malicioso
@@ -267,11 +273,12 @@ def plot_label_distribution(df: pd.DataFrame, subfolder: str) -> None:
     plt.close()
 
 
-def plot_attack_distribution(df: pd.DataFrame, subfolder: str, attack_colors) -> None:
+def plot_attack_distribution(df: pd.DataFrame, subfolder: str, attack_colors, destination) -> None:
     """Metodo para generar un grafico sobre la distribucion del atributo "Tipo de Ataque"."""
 
-    carpeta_proyecto = "C:\\Users\\avelg\\PycharmProjects\\NIDS"
-    target_path = os.path.join(carpeta_proyecto, "analysis", "diagrams", subfolder)
+    carpeta_proyecto = Path(__file__).resolve().parent.parent
+    target_path = carpeta_proyecto / "analysis"/ "diagrams"/ destination / subfolder
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
 
     df_attacks = df[df['Label'] != 0]
     counts = df_attacks['Attack Name'].value_counts()
@@ -293,11 +300,12 @@ def plot_attack_distribution(df: pd.DataFrame, subfolder: str, attack_colors) ->
     plt.close()
 
 
-def plot_service_attacked(df: pd.DataFrame, subfolder: str) -> None:
+def plot_service_attacked(df: pd.DataFrame, subfolder: str, destination) -> None:
     """Metodo para generar un grafico sobre la distribucion del atributo "Tipo de Ataque"."""
 
-    carpeta_proyecto = "C:\\Users\\avelg\\PycharmProjects\\NIDS"
-    target_path = os.path.join(carpeta_proyecto, "analysis", "diagrams", subfolder)
+    carpeta_proyecto = Path(__file__).resolve().parent.parent
+    target_path = carpeta_proyecto / "analysis"/ "diagrams"/ destination / subfolder
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
 
     df_attacks = df[df['Label'] != 0]
     counts = df_attacks['Service'].value_counts()
@@ -317,11 +325,11 @@ def plot_service_attacked(df: pd.DataFrame, subfolder: str) -> None:
     plt.close()
 
 
-def plot_numerical_attributes_distribution(df: pd.DataFrame, subfolder: str) -> None:
-    carpeta_proyecto = "C:\\Users\\avelg\\PycharmProjects\\NIDS"
-    target_path = os.path.join(carpeta_proyecto,"analysis","diagrams",subfolder)
+def plot_numerical_attributes_distribution(df: pd.DataFrame, subfolder: str, destination) -> None:
 
-    os.makedirs(target_path, exist_ok=True)
+    carpeta_proyecto = Path(__file__).resolve().parent.parent
+    target_path = carpeta_proyecto / "analysis"/ "diagrams"/ destination / subfolder
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
 
     sample_size = min(1000000,len(df))
     sample_df = df.sample(sample_size, random_state = 42)
@@ -359,12 +367,15 @@ def plot_numerical_attributes_distribution(df: pd.DataFrame, subfolder: str) -> 
     print(f"Guardados los diagramas para {subfolder}")
 
 
-
 def main():
-    base_folder= "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\processed\\CIC-BCCC-NRC-TabularIoT-2024-MOD"
-    # Solo evaluar el dataset ya procesado, en caso contrario explota ya que hay csv que en el campo 'Date' tienen diferente formato
-    procesar_todos_datasets(base_folder)
+    project_folder = Path(__file__).resolve().parent.parent
 
+    raw_dataframe = project_folder / "data" / "raw" / "CIC-BCCC-NRC-TabularIoT-2024"
+    processed_dataframe = project_folder / "data" / "processed" / "CIC-BCCC-NRC-TabularIoT-2024"
+
+    # Solo evaluar el dataset ya procesado, en caso contrario explota ya que hay csv que en el campo 'Date' tienen diferente formato
+    process_dataset(raw_dataframe, "raw")
+    # process_dataset(processed_dataframe, "processed")
 
 if __name__ == "__main__":
     main()
