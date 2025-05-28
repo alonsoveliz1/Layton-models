@@ -1,35 +1,8 @@
 import datetime
 import os
 import pandas as pd
-
-def parsear_fecha_flujo(timestamp_str) -> datetime:
-
-    # Primero, eliminamos los espacios adicionales
-    timestamp_str = timestamp_str.strip()
-
-    timestamp_formats = [
-        '%d/%m/%Y %I:%M:%S %p',
-        '%d/%m/%y %H:%M',
-        '%d/%m/%Y %H:%M:%S',
-        '%m/%d/%Y %I:%M:%S %p',
-        '%Y-%m-%d %H:%M:%S'
-    ]
-
-    for formato in timestamp_formats:
-        try:
-            return pd.to_datetime(timestamp_str, format=formato)
-        except ValueError as e:
-            # print(f"Error con formato {formato}: {e}")
-            continue
-
-    # Como último recurso si no se puede parsear con los formatos que le paso, que lo intente parsear automaticamente
-    try:
-        print("Intentando parseo automático")
-        return pd.to_datetime(timestamp_str)
-    except Exception as e:
-        print(f"Todos los formatos fallaron: {e}")
-        return timestamp_str
-
+from pathlib import Path
+from collections import Counter
 
 
 def procesar_ficheros_csv(archivo_csv: str, target_path: str) -> None:
@@ -38,13 +11,21 @@ def procesar_ficheros_csv(archivo_csv: str, target_path: str) -> None:
     # Mapeo de puertos a servicios (se irá iterando), 24 servicios al principio entre los mas reconocidos (luego habra que tener en cuenta Otros y los Ephemeral) Ahora menos
     port_service_map = {
         22: "SSH",
+        23: "Telnet",
         80: "HTTP",
         81: "HTTP",
         8000: "HTTP",
-        8081: "HTTP",
-        1883: "MQTT",
         443: "HTTPS",
+        554: "RTSP",
+        1883: "MQTT",
+        8080: "HTTP-Alt",
+        4321: "RemoteShell/CustomApp",
+        3333: "CustomService/IRC-Alt",
+        6668: "IRC",
+        9197: "UnknownApp",
+        10002: "IoT-Gateway",
     }
+
 
     # Mapeo de cada clase de ataque
     dos_map = {'DoS TCP Flood', 'DoS SYN Flood', 'SYN Flood', 'DoS DNS Flood'}
@@ -83,9 +64,16 @@ def procesar_ficheros_csv(archivo_csv: str, target_path: str) -> None:
             return 'Unknown'
 
 
+    columns_to_drop = ['Flow ID',   # Negative values
+                       'Src IP',
+                       'Src Port',
+                       'Dst IP',
+                       'Dst Port',  # Mapped to service
+                       'Protocol',  # All protocol 6
+                       'Device',    # Only present in 2 files
+                       'Timestamp'] # Not useful for the model
 
-    columns_to_drop = ['Flow ID', 'Src IP', 'Src Port', 'Dst IP', 'Dst Port', 'Protocol', 'Device']
-
+    # Convert all numerical attributes into float (consistency)
     float_columns = ['Idle Std', 'Idle Max', 'Total Length of Fwd Packet', 'Total Length of Bwd Packet',
                      'Fwd Packet Length Max', 'Fwd Packet Length Min', 'Bwd Packet Length Max',
                      'Bwd Packet Length Min', 'Packet Length Min', 'Packet Length Max', 'Down/Up Ratio',
@@ -96,11 +84,11 @@ def procesar_ficheros_csv(archivo_csv: str, target_path: str) -> None:
         if port in port_service_map:
             return port_service_map[port]
         elif 8000 <= port <= 9000:
-            return "Puerto tipico IoT"
+            return "IoT"
         elif 49152 <= port <= 65535:
-            return "Puertos Efimeros/Dinamicos"
+            return "Ephemeral"
         else:
-            return "Otros"
+            return "Other"
 
     # Leer el archivo CSV completo
     df = pd.read_csv(archivo_csv, low_memory=False)
@@ -110,9 +98,6 @@ def procesar_ficheros_csv(archivo_csv: str, target_path: str) -> None:
         if col in df.columns:
             df[col] = df[col].astype(float)
 
-    # Procesar la columna timestamp si existe (spoiler: existe siempre)
-    if 'Timestamp' in df.columns:
-        df['Timestamp'] = df['Timestamp'].apply(parsear_fecha_flujo)
 
     # Añadir columna de Service
     df['Service'] = df['Dst Port'].apply(map_service)
@@ -125,17 +110,57 @@ def procesar_ficheros_csv(archivo_csv: str, target_path: str) -> None:
 
     # Eliminar las columnas negativas tambien
     df_numeric = df.select_dtypes(include='number')
-
     mask_negative = (df_numeric < 0).any(axis=1)
-
     df_sin_negativos = df[~mask_negative]
+
     # Guardar el resultado
     df_sin_negativos.to_csv(target_path, index=False)
 
 
+def obtener_puertos_relevantes(base_folder: Path, top_n=15, top_discriminative=10):
+    """Funcion para encontrar cuales son los puertos mas relevantes de cada dataset, tanto para las filas maliciosas
+       como para las benignas, en lo que respecta a número de frecuencia y capacidad de discriminación."""
 
-def procesar_csvs(base_folder: str, target_folder: str) -> None:
-    """Metodo lanzadera para procesar los archivos csv y que se guarden en su respectiva carpeta"""
+    total_counter = Counter()
+    benign_counter = Counter()
+    malicious_counter = Counter()
+
+    print("Analizando puertos relevantes globales...")
+    for subdir, _, files in os.walk(base_folder):
+        for file in files:
+            if file.endswith(".csv"):
+                path = os.path.join(subdir, file)
+                try:
+                    df = pd.read_csv(path, usecols=['Dst Port', 'Label'])
+                    total = df['Dst Port'].value_counts(normalize=True)
+                    benign = df[df['Label'] == 0]['Dst Port'].value_counts(normalize=True)
+                    mal = df[df['Label'] == 1]['Dst Port'].value_counts(normalize=True)
+
+                    total_counter.update(total.to_dict())
+                    benign_counter.update(benign.to_dict())
+                    malicious_counter.update(mal.to_dict())
+                except Exception as e:
+                    print(f"Error leyendo {path}: {e}")
+
+    # Top-N más frecuentes
+    top_ports = [port for port, _ in total_counter.most_common(top_n)]
+
+    # Puertos discriminativos (por diferencia)
+    discriminative_scores = {
+        port: abs(benign_counter.get(port, 0) - malicious_counter.get(port, 0))
+        for port in total_counter
+    }
+    top_discriminative_ports = sorted(discriminative_scores, key=discriminative_scores.get, reverse=True)[:top_discriminative]
+
+    return set(top_ports + top_discriminative_ports)
+
+def procesar_csvs(base_folder: Path , target_folder: Path) -> None:
+    """Metodo lanzadera para procesar los archivos csv y que se guarden en su respectiva carpeta,
+       primero se ha de lanzar el metodo para ver cuales son los puertos más presentes en dataset"""
+
+    # Find which are the most relevant ports in the dataset
+    # relevant_ports = obtener_puertos_relevantes(base_folder)
+    # print(relevant_ports)
 
     for subdir, _, files in os.walk(base_folder):
         for file in files:
@@ -163,11 +188,10 @@ def procesar_csvs(base_folder: str, target_folder: str) -> None:
 
 
 def main():
-    base_folder = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\raw\\CIC-BCCC-NRC-TabularIoT-2024"
-    target_folder = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\processed\\CIC-BCCC-NRC-TabularIoT-2024-MOD"
-    procesar_csvs(base_folder, target_folder)
-
-
+    project_folder = Path(__file__).resolve().parent.parent
+    raw_folder = project_folder / "data" / "raw" / "CIC-BCCC-NRC-TabularIoT-2024"
+    target_folder = project_folder / "data" / "processed" / "CIC-BCCC-NRC-TabularIoT-2024-MOD"
+    procesar_csvs(raw_folder, target_folder)
 
 if __name__ == "__main__":
     main()
