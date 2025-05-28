@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-
+from pathlib import Path
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', None)
@@ -91,7 +91,7 @@ def encontrar_csv_con_nulos(csv_files: [str]) -> [(str, str, dict)]:
 
 
 
-def run_consistency_check(base_folder: str, reference_csv: str) -> None:
+def run_consistency_check(base_folder: Path, reference_csv: Path) -> None:
     """Metodo para invocar al proceso de verifcar la consistencia y mostrar su resultado. En caso de que no haya consistencia se muestra
        cual es el archivo que causa el problema, y el motivo."""
 
@@ -120,15 +120,16 @@ def run_consistency_check(base_folder: str, reference_csv: str) -> None:
 
 
 def main():
-    # DESCOMENTAR SI QUIERO ANALIZAR EL DATASET ORIGINAL
-    base_folder = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\raw\\CIC-BCCC-NRC-TabularIoT-2024"
-    reference_csv = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\raw\\CIC-BCCC-NRC-TabularIoT-2024\\CIC-BCCC-ACI-IOT-2023\\Benign Traffic.csv"
+    # Uncomment to analyse raw dataset
+    project_folder = Path(__file__).resolve().parent.parent
+    dataset_folder = project_folder / "data" / "raw" / "CIC-BCCC-NRC-TabularIoT-2024"
+    reference_csv =  project_folder / "data"/ "raw" / "CIC-BCCC-NRC-TabularIoT-2024" / "CIC-BCCC-ACI-IOT-2023" / "Benign Traffic.csv"
 
-    # DESCOMENTAR SI QUIERO ANALIZAR EL DATASET PROCESADO (comprobacion de que este correcto tras procesarlo)
-    #base_folder= "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\processed\\CIC-BCCC-NRC-TabularIoT-2024-MOD"
-    #reference_csv = "C:\\Users\\avelg\\PycharmProjects\\NIDS\\data\\processed\\CIC-BCCC-NRC-TabularIoT-2024-MOD\\CIC-BCCC-ACI-IOT-2023\\Benign Traffic.csv"
+    # Uncomment to analyse processed dataset
+    # dataset_folder = project_folder / "data" / "processed" / "CIC-BCCC-NRC-TabularIoT-2024-MOD"
+    # reference_csv = project_folder / "data" / "processed" / "CIC-BCCC-NRC-TabularIoT-2024-MOD"/ "CIC-BCCC-ACI-IOT-2023" / "Benign Traffic.csv"
 
-    run_consistency_check(base_folder, reference_csv)
+    run_consistency_check(dataset_folder, reference_csv)
 
 if __name__ == "__main__":
     main()
