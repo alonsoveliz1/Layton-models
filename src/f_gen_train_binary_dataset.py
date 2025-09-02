@@ -12,7 +12,7 @@ def generar_dataset_balanceado(df) -> None:
     muestras_por_categoria = int(n_instances / n_categories)
     balanced_categories = []
 
-    # Balance by attack type
+    # Balanceamos por tipo de ataque
     for attack_name, df_cat in df_malicious.groupby('Attack Category'):
         print(f"Processing {attack_name}")
         subattacks = df_cat['Attack Name'].unique()
@@ -25,7 +25,10 @@ def generar_dataset_balanceado(df) -> None:
         for subattack_name, df_sub in df_cat.groupby('Attack Name'):
             print(f"Processing {subattack_name}")
             replace_needed = (len(df_sub) < muestras_por_subataque)
-            print(f"Replace needed {replace_needed}")
+            if replace_needed:
+                print(f"Replace needed {replace_needed}")
+                print(f"Muestras repetidas {muestras_por_subataque - len(df_sub)}")
+
             df_sub_bal = resample(
                 df_sub,
                 replace = replace_needed,
@@ -40,10 +43,11 @@ def generar_dataset_balanceado(df) -> None:
 
     balanced_malicious = pd.concat(balanced_categories, ignore_index=True)
 
-    # We also have to create a balanced subset of the benign traffic, since most of it is from the MQTT service so bias ain't introduced in the model
+    # Tambien tenemos que balancear por trafico benigno, dado que la mayor parte proviene de Trazas del servicio MQTT para así no introducir sesgos al modelo
     balanced_services = []
     n_services = df_benign['Service'].nunique()
-    n_instances_benign = n_instances * n_categories
+    n_instances_benign = n_instances
+
 
     for service_type, df_serv in df_benign.groupby('Service'):
         replace_needed = (len(df_serv) < n_instances_benign)
@@ -61,7 +65,7 @@ def generar_dataset_balanceado(df) -> None:
     base_path = Path(__file__).resolve().parent.parent
     final_path = base_path / "data" / "processed" / "CIC-BCCC-NRC-TabularIoT-2024-MOD" /  "combinado_balanceado.csv"
 
-    # Shuffle
+    # Mezclar
     balanced_total = balanced_total.sample(frac=1, random_state=42).reset_index(drop=True)
     balanced_total.to_csv(final_path, index = False)
 
