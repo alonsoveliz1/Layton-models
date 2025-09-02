@@ -8,7 +8,8 @@ from collections import Counter
 def procesar_ficheros_csv(archivo_csv: str, target_path: str) -> None:
     """Procesamiento del dataset incluye el mapeo de puertos en los servicios utilizados, eliminacion de columnas innecesarias
         reconversion de tipos de los atributos para que sean consistentes,,,"""
-    # Mapeo de puertos a servicios (se irá iterando), 24 servicios al principio entre los mas reconocidos (luego habra que tener en cuenta Otros y los Ephemeral) Ahora menos
+
+   # Mapeo de puertos a servicios (se irá iterando), 24 servicios al principio entre los mas reconocidos (luego habra que tener en cuenta Otros y los Ephemeral) Ahora menos
     port_service_map = {
         22: "SSH",
         23: "Telnet",
@@ -64,16 +65,16 @@ def procesar_ficheros_csv(archivo_csv: str, target_path: str) -> None:
             return 'Unknown'
 
 
-    columns_to_drop = ['Flow ID',   # Negative values
+    columns_to_drop = ['Flow ID',   # Useless
                        'Src IP',
                        'Src Port',
                        'Dst IP',
-                       'Dst Port',  # Mapped to service
-                       'Protocol',  # All protocol 6
-                       'Device',    # Only present in 2 files
-                       'Timestamp'] # Not useful for the model
+                       'Dst Port',  # Mapeadas a servicio
+                       'Protocol',  # Siempre protocolo TCP
+                       'Device',    # Solo en 2 ficheros
+                       'Timestamp'] # No es util para el modelo
 
-    # Convert all numerical attributes into float (consistency)
+    # Convertir todos los atributos numéricos a float
     float_columns = ['Idle Std', 'Idle Max', 'Total Length of Fwd Packet', 'Total Length of Bwd Packet',
                      'Fwd Packet Length Max', 'Fwd Packet Length Min', 'Bwd Packet Length Max',
                      'Bwd Packet Length Min', 'Packet Length Min', 'Packet Length Max', 'Down/Up Ratio',
@@ -99,8 +100,8 @@ def procesar_ficheros_csv(archivo_csv: str, target_path: str) -> None:
             df[col] = df[col].astype(float)
 
 
-    # Añadir columna de Service
-    df['Service'] = df['Dst Port'].apply(map_service)
+    # # Añadir columna de Service
+    # df['Service'] = df['Dst Port'].apply(map_service)
 
     # Añadir columna de Categoria de ataque
     df['Attack Category'] = df['Attack Name'].apply(classify_attack)
@@ -115,6 +116,7 @@ def procesar_ficheros_csv(archivo_csv: str, target_path: str) -> None:
 
     # Guardar el resultado
     df_sin_negativos.to_csv(target_path, index=False)
+
 
 
 def obtener_puertos_relevantes(base_folder: Path, top_n=15, top_discriminative=10):
@@ -154,13 +156,15 @@ def obtener_puertos_relevantes(base_folder: Path, top_n=15, top_discriminative=1
 
     return set(top_ports + top_discriminative_ports)
 
+
+
 def procesar_csvs(base_folder: Path , target_folder: Path) -> None:
     """Metodo lanzadera para procesar los archivos csv y que se guarden en su respectiva carpeta,
        primero se ha de lanzar el metodo para ver cuales son los puertos más presentes en dataset"""
 
     # Find which are the most relevant ports in the dataset
-    # relevant_ports = obtener_puertos_relevantes(base_folder)
-    # print(relevant_ports)
+    relevant_ports = obtener_puertos_relevantes(base_folder)
+    print(relevant_ports)
 
     for subdir, _, files in os.walk(base_folder):
         for file in files:
