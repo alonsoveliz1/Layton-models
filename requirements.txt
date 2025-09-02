@@ -19,7 +19,7 @@ onnxmltools==1.13.0
 optuna==4.3.0
 packaging==25.0
 pandas==2.2.3
-pillow==11.2.1
+pillow>=11.3.0
 protobuf==6.31.0
 pyparsing==3.2.3
 python-dateutil==2.9.0.post0
