@@ -236,7 +236,7 @@ def write_dataset_info(df: pd.DataFrame, subfolder: str, destination) -> None:
         write_to_file("\nPuertos de destino más frecuentes:")
         write_to_file("-" * 30)
 
-        if destination == "raw": # Column doesnt exist in the processed dataset
+        if destination == "raw": # La columna no existe en el dataset procesado
             if 'Dst Port' in df.columns:
                 top_ports = df['Dst Port'].value_counts().head(20)  # Top 20 más comunes
                 write_to_file(top_ports.to_string())
