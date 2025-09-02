@@ -120,12 +120,12 @@ def run_consistency_check(base_folder: Path, reference_csv: Path) -> None:
 
 
 def main():
-    # Uncomment to analyse raw dataset
+    # Descomentar para tratar el dataset completo
     project_folder = Path(__file__).resolve().parent.parent
     dataset_folder = project_folder / "data" / "raw" / "CIC-BCCC-NRC-TabularIoT-2024"
     reference_csv =  project_folder / "data"/ "raw" / "CIC-BCCC-NRC-TabularIoT-2024" / "CIC-BCCC-ACI-IOT-2023" / "Benign Traffic.csv"
 
-    # Uncomment to analyse processed dataset
+    # Descomentar para tratar el dataset ya procesado
     # dataset_folder = project_folder / "data" / "processed" / "CIC-BCCC-NRC-TabularIoT-2024-MOD"
     # reference_csv = project_folder / "data" / "processed" / "CIC-BCCC-NRC-TabularIoT-2024-MOD"/ "CIC-BCCC-ACI-IOT-2023" / "Benign Traffic.csv"
 
